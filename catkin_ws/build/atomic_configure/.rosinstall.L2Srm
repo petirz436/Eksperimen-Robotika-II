@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/fathir/eksbot2/catkin_ws/devel/setup.sh

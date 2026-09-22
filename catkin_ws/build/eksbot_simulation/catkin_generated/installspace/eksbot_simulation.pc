@@ -1,0 +1,8 @@
+prefix=/home/fathir/eksbot2/catkin_ws/install
+
+Name: eksbot_simulation
+Description: Description of eksbot_simulation
+Version: 1.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

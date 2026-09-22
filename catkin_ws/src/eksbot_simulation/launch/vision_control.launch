@@ -1,0 +1,8 @@
+<launch>
+  <!-- Launch ROS Vision Target Node -->
+  <node name="vision_target_node" pkg="eksbot_simulation" type="visionTarget.py" output="screen">
+    <param name="use_ros_topic" value="true" />
+    <param name="image_topic" value="/camera/image_raw" />
+    <param name="use_esp_cam" value="false" />
+  </node>
+</launch>

@@ -1,0 +1,101 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="autostack_arena">
+
+    <!-- Sun Light -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <!-- AutoStack Ground Arena -->
+    <include>
+      <uri>model://arena_ground</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+
+    <!-- Physics Setup -->
+    <physics type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
+      <gravity>0 0 -9.81</gravity>
+    </physics>
+
+    <!-- PRE-SPAWNED CUBES FOR AUTOSTACK CHALLENGE -->
+    <!-- Red Cubes near Red Base (South) -->
+    <include>
+      <name>cube_red_1</name>
+      <uri>model://cube_red</uri>
+      <pose>0.0 -1.2 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_red_2</name>
+      <uri>model://cube_red</uri>
+      <pose>0.1 -1.2 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_red_3</name>
+      <uri>model://cube_red</uri>
+      <pose>-0.1 -1.2 0.025 0 0 0</pose>
+    </include>
+
+    <!-- Green Cubes near Green Base (West) -->
+    <include>
+      <name>cube_green_1</name>
+      <uri>model://cube_green</uri>
+      <pose>-1.2 0.0 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_green_2</name>
+      <uri>model://cube_green</uri>
+      <pose>-1.2 0.1 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_green_3</name>
+      <uri>model://cube_green</uri>
+      <pose>-1.2 -0.1 0.025 0 0 0</pose>
+    </include>
+
+    <!-- Blue Cubes near Blue Base (East) -->
+    <include>
+      <name>cube_blue_1</name>
+      <uri>model://cube_blue</uri>
+      <pose>1.2 0.0 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_blue_2</name>
+      <uri>model://cube_blue</uri>
+      <pose>1.2 0.1 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_blue_3</name>
+      <uri>model://cube_blue</uri>
+      <pose>1.2 -0.1 0.025 0 0 0</pose>
+    </include>
+
+    <!-- Additional Cubes on Stacking Pads -->
+    <include>
+      <name>cube_red_pad</name>
+      <uri>model://cube_red</uri>
+      <pose>0.0 -1.6 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_green_pad</name>
+      <uri>model://cube_green</uri>
+      <pose>-1.6 0.0 0.025 0 0 0</pose>
+    </include>
+    <include>
+      <name>cube_blue_pad</name>
+      <uri>model://cube_blue</uri>
+      <pose>1.6 0.0 0.025 0 0 0</pose>
+    </include>
+
+    <!-- Camera Viewpoint Scene Setup -->
+    <gui fullscreen="0">
+      <camera name="user_camera">
+        <pose>0 -3.0 2.5 0 0.7 1.5708</pose>
+      </camera>
+    </gui>
+
+  </world>
+</sdf>

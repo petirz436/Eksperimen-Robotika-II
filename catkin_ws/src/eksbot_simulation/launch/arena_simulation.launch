@@ -1,0 +1,22 @@
+<launch>
+  <!-- Launch Gazebo World -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find eksbot_simulation)/worlds/autostack_arena.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <!-- Load Robot Description URDF -->
+  <param name="robot_description" command="$(find xacro)/xacro '$(find eksbot_simulation)/urdf/dummy_robot.urdf.xacro'" />
+
+  <!-- Spawn Robot Dummy into Gazebo -->
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-param robot_description -urdf -model dummy_robot -x 0 -y 0 -z 0.05" respawn="false" output="screen" />
+
+  <!-- Robot State Publisher -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+  <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
+
+</launch>

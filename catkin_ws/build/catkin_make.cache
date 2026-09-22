@@ -1,0 +1,2 @@
+eksbot_simulation
+-DCATKIN_DEVEL_PREFIX=/home/fathir/eksbot2/catkin_ws/devel -DCMAKE_INSTALL_PREFIX=/home/fathir/eksbot2/catkin_ws/install -G Unix Makefiles

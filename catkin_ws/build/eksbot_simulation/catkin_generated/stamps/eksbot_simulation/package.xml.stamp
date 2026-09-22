@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>eksbot_simulation</name>
+  <version>1.0.0</version>
+  <description>AutoStack Challenge Gazebo simulation, arena, dummy robot, and ROS vision tracking node.</description>
+
+  <maintainer email="fathir@todo.todo">fathir</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>gazebo_ros</depend>
+  <depend>urdf</depend>
+  <depend>xacro</depend>
+  <depend>cv_bridge</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>rospy</depend>
+
+  <exec_depend>gazebo_plugins</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>rviz</exec_depend>
+
+  <export>
+    <gazebo_ros gazebo_media_path="${prefix}" gazebo_model_path="${prefix}/models"/>
+  </export>
+</package>
