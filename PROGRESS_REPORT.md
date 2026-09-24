@@ -60,6 +60,62 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
      - **ESP32 Kontroler**: Firmware C++ (`esp32_firmware_example.ino`) penerima topik ROS `/cmd_vel` & `/esp32/servo`.
      - **Laptop**: Pusat komputasi yang menjalankan `vision.py` (OpenCV), `robot_api.py` (ROS Publisher/Subscriber), dan `main.py` (Otak Strategi Misi).
 
+### Prompt 6: Diskusi Arsitektur Sistem Terpisah (ESP32-CAM, ESP32 Kontroler, Laptop) & Saran Optimalisasi
+- **User Prompt**: Ajak aku diskusi jika program dibuat terpisah seperti di simi26 apakah bisa? Jadi ada program di esp cam, di esp yg sistem kontrol serta terakhir program di laptop. Adakah saran untukku atau ada yg lebih baik?
+- **Tindakan & Progress**: Melakukan analisis dan pembimbingan diskusi arsitektur terdistribusi (Distributed Systems), membandingkan kelebihan/kekurangan skema 3-tier, serta memberikan rekomendasi protokol komunikasi (`rosserial`/Micro-ROS/Serial) dan struktur modular software.
+
+### Prompt 7: Perancangan Rencana Arsitektur Modular 3-Tier (ESP32-CAM SoftAP + Serial Cable to ESP32 Control)
+- **User Prompt**: Ubah workspace ini agar jadi sistem modular. ESP-CAM jadi pemancar Wi-Fi yang nanti Wi-Fi diterima oleh laptop nanti kalkulasi eror di laptop dan kirim hasil ke ESP-CAM dari ESP-CAM nanti kirim eror ke ESP sistem kontrol dengan komunikasi kabel. Apakah memungkinkan?
+- **Tindakan & Progress**:
+  1. Mengonfirmasi bahwa skema ini **SANGAT MEMUNGKINKAN (100% Valid & Optimal)**.
+  2. Menyusun `implementation_plan.md` yang membagi sistem menjadi:
+     - **ESP32-CAM**: Firmware SoftAP + MJPEG Streamer + Wi-Fi Control Listener + UART Serial Cable Bridge.
+     - **Laptop**: `vision.py` (OpenCV RGB HSV Masking + Color Switcher R/G/B tanpa warna coklat), `robot_api.py` (Network/ROS Control API), dan `main.py` (State Machine Misi).
+     - **ESP32 Sistem Kontrol**: Firmware UART Serial Listener + Motor Differential Drive PWM & Servo Gripper/Lift.
+
+### Prompt 8: Implementasi Lengkap Sistem Modular (Simulasi Gazebo, Vision RGB Switcher, Kontrol Manual WSAD, & Firmware ESP32)
+- **User Prompt**: Langsung garap semua termasuk yang simulasinya juga serta buat agar robot dapat di kontrol manual juga selain robot ikut navigasi dari kamera. Robot di kontrol dengan W S A D.
+- **Tindakan & Progress**:
+  1. **[vision.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/vision.py)**: Dibuat modul Vision Engine OpenCV untuk deteksi Red (R), Green (G), Blue (B) dengan switcher mode warna (`1`:Red, `2`:Green, `3`:Blue) & CSRT Tracker (kode warna coklat dibuang).
+  2. **[robot_api.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/robot_api.py)**: Dibuat modul Robot Interface API pengirim sinyal kecepatan `/cmd_vel` (ROS) & Wi-Fi UDP Packet ke ESP32.
+  3. **[main.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/main.py)**: Dibuat aplikasi utama yang mengombinasikan **Kontrol Manual Keyboard WSAD** (W:Maju, S:Mundur, A:Kiri, D:Kanan, SPACE:Stop, J/K:Gripper, U/I:Lift) dan **Auto Vision Navigation** (Switch mode via tombol `M`).
+  4. **[firmware_esp32_cam.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/firmware_esp32_cam.ino)**: Dibuat firmware SoftAP ESP32-CAM (`AutoStack-ESP-CAM`), MJPEG Streamer `/stream`, dan Hardware Serial UART2 Bridge (Pin 17 TX2 / Pin 16 RX2).
+  5. **[firmware_esp32_control.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/firmware_esp32_control.ino)**: Dibuat firmware ESP32 Sistem Kontrol penerima instruksi Serial Kabel UART2, pengendali Differential Drive Motor DC (L298N PWM), dan Servo Gripper/Lift.
+  6. **[modular_control.launch](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/launch/modular_control.launch)**: Launch file ROS untuk menjalankan `main.py` di lingkungan simulasi Gazebo.
+  7. **Kompilasi & Dokumentasi**: Workspace terkompilasi 100% via `catkin_make`. `README.md` dan `PROGRESS_REPORT.md` diperbarui lengkap.
+
+### Prompt 9: Pembuatan Program Uji ESP32-CAM + Web Stream + Vision Laptop -> TFT LCD di Folder Khusus (`tes_cam_lcd`)
+- **User Prompt**: Buat tes cam esp untuk di-up ke ESP-CAM yang nanti hasil kamera dimasukkan ke TFT LCD dengan pin (VCC 3.3V, GND, SCL GPIO 25, SDA GPIO 33, RST GPIO 32, CS GPIO 34, BL 3.3V). Lalu hasil distreaming ke website lokal yang dibuka di laptop lalu laptop menjalankan vision.py untuk deteksi objek lalu hasil deteksi ditampilkan di LCD, apakah bisa? Hanya ubah tescamesp.cpp jangan ubah code lain, buat folder baru.
+- **Tindakan & Progress**:
+  1. **Analisis Kelayakan Hardware & Pinout**:
+     - Mengonfirmasi bahwa **SISTEM INI 100% MEMUNGKINKAN DAN BISA DILAKUKAN**.
+     - Memberikan peringatan bentrok hardware: **GPIO 25 (VSYNC kamera)**, **GPIO 32 (PWDN kamera)**, dan **GPIO 34 (Input-Only & Data Y8 kamera)** tidak dapat digunakan sebagai pin SPI LCD karena akan menyebabkan kamera crash/error.
+     - Menyediakan solusi skema wiring pinout aman di ESP32-CAM menggunakan pin SD-Card yang bebas: **CLK: GPIO 14, MOSI: GPIO 13, CS: GPIO 15, DC: GPIO 2, RST: GPIO 12**.
+  2. **[tescamesp.cpp](file:///home/fathir/eksbot2/tescamesp.cpp)**: Dibuat program C++ Arduino lengkap berisi HTTP MJPEG Streamer, UDP Listener (Port 8888), dan Driver ST7735/ILI9341 TFT LCD.
+  3. **Folder Khusus [tes_cam_lcd](file:///home/fathir/eksbot2/tes_cam_lcd)**: Dibuat folder terisolasi berisi:
+     - `tescamesp.cpp`: C++ firmware ESP32-CAM.
+     - `test_vision_laptop.py`: Script Python penguji laptop yang menangkap stream web, menjalankan vision RGB, dan mengirimkan paket telemetri UDP ke ESP32-CAM.
+     - `README.md`: Panduan wiring dan cara pengujian.
+
+### Prompt 10: Randomization Kubus Tengah Arena, Spawn Robot di Base Biru, & Perbaikan Delay Kontrol WSAD
+- **User Prompt**: Buatkan agar kubus-kubus diletakkan di tengah arena secara acak, lalu robot taruh di arena biru. Perbaiki mekanisme maju mundur belok kiri kanan karena terkadang delay.
+- **Tindakan & Progress**:
+  1. **Randomization Kubus di Tengah Arena ([autostack_arena.world](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/worlds/autostack_arena.world))**: Mengatur ulang pose 9 kubus (3 Merah, 3 Hijau, 3 Biru) agar tersebar secara acak di dalam area ring pusat arena ($r < 0.6\text{ m}$).
+  2. **Spawn Robot di Base Biru ([arena_simulation.launch](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/launch/arena_simulation.launch))**: Mengubah koordinat spawn awal robot ke Base Biru (East Base) pada `x = 1.35 m, y = 0.0 m, Yaw = 3.14159 rad` (menghadap ke pusat arena).
+  3. **Perbaikan Akselerasi Gazebo ([dummy_robot.urdf.xacro](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/urdf/dummy_robot.urdf.xacro))**: Meningkatkan `<wheelAcceleration>` dari `1.0` ke `10.0` rad/s^2 dan `<wheelTorque>` dari `10` ke `30` N.m untuk menghilangkan delay akselerasi fisik Gazebo.
+  4. **Perbaikan Kontrol Keyboard Responsif ([main.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/main.py))**: Fast 1ms sampling + key-hold watchdog.
+
+### Prompt 11: Mekanisme Animasi 3D Grip/Release, Otomasi Auto-Grip & Lift, dan Navigasi Orient-First (Bebas Ragu-ragu & Patah-Patah)
+- **User Prompt**: Buatkan 3d model untuk animasi mekanisme grip dan release. Saat target sudah dijangkauan robot akan grip target otomatis saat di mode otomatis. Koreksi navigasinya kenapa terkesan patah patah? Perbaiki. Saat dia ke lokasi tujuan dia seperti ragu ragu dan saat serong dia tidak langsung serong tpi maju belok maju belok sedikit demi sedikit. Aku mau dia sesuaikan orientasi baru maju.
+- **Tindakan & Progress**:
+  1. **3D Vacuum Gripper Mechanism ([dummy_robot.urdf.xacro](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/urdf/dummy_robot.urdf.xacro))**: Menambahkan plugin `libgazebo_ros_vacuum_gripper.so` pada `lift_carriage` link untuk animasi fisik penempelan, pencengkeraman, dan pengangkatan kubus dalam ruang 3D Gazebo.
+  2. **ROS Joint & Vacuum Control ([robot_api.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/robot_api.py))**: Mengintegrasikan publisher topik `/dummy_robot/gripper_switch` (`std_msgs/Bool`) yang otomatis aktif saat `set_gripper("CLOSE")` dan mati saat `set_gripper("OPEN")`.
+  3. **Navigasi Orient-First (Luruskan Orientasi Dulu, Baru Maju Lurus) ([main.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/main.py))**:
+     - Membuang logika zig-zag "maju-belok-maju-belok".
+     - **Fase 1 (Aligning)**: Jika galat sudut $|\text{norm\_x}| > 0.12$, robot berhenti maju (`linear.x = 0.0`) dan memutar orientasinya di tempat (`angular.z = -1.8 * norm_x`) hingga lurus menghadap kubus.
+     - **Fase 2 (Driving Straight)**: Setelah sudut lurus ($|\text{norm\_x}| \le 0.12$), robot maju lurus penuh ke depan (`linear.x = 0.25`) tanpa ragu-ragu.
+  4. **Otomasi Auto-Grip & Lift 3D saat Target Terjangkau ([main.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/main.py) & [vision.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/vision.py))**: Saat kubus berada tepat di depan robot (`target_cy > frame_h - 110` atau `target_area > 12000`), robot otomatis berhenti, menutup gripper 3D, menempelkan kubus, dan mengangkut lift carriage ke atas secara otomatis.
+
 ---
 
 ## 🗺️ Peta File Utama Dalam Workspace

@@ -28,65 +28,42 @@ Proyek ini dirancang untuk menyelesaikan tantangan **AutoStack Challenge**, di m
 
 ### Arsitektur Sistem Terdistribusi (Laptop + ESP32-CAM + ESP32):
 ```
-+-------------------------------------------------------------------------+
-|                              LAPTOP (ROS)                               |
-|                                                                         |
-|  +---------------------+      +------------------+                   |
-|  | Gazebo / ESP32-CAM  | ---> | visionTarget.py  |                   |
-|  | Image Stream        |      | (Color & CSRT)   |                   |
-|  +---------------------+      +--------+---------+                   |
-|                                        |                             |
-|                                        v                             |
-|                               +------------------+                   |
-|                               | Topik ROS        |                   |
-|                               | /cmd_vel         |                   |
-|                               | /esp32/servo     |                   |
-|                               +--------+---------+                   |
-+----------------------------------------|--------------------------------+
-                                         | (rosserial / USB / Wi-Fi)
-                                         v
-+-------------------------------------------------------------------------+
-|                           ESP32 (KONTROLER)                             |
-|                                                                         |
-|  +---------------------+      +------------------+                   |
-|  | Driver Motor        | <--- | esp32_firmware   |                   |
-|  | L298N / BTS7960     |      | (Motor & Servo)  |                   |
-|  +---------------------+      +------------------+                   |
-+-------------------------------------------------------------------------+
+### Arsitektur Sistem Terdistribusi Modular (Laptop + ESP32-CAM + ESP32 Kontroler):
+```
++-----------------------------------------------------------------------------------+
+|                                   LAPTOP                                          |
+|                                                                                   |
+|  +--------------------+        +---------------+       +-----------------------+  |
+|  | Gazebo / ESP32-CAM | -----> |   vision.py   | ----> |        main.py        |  |
+|  | Image Stream       |        | (RGB Switcher)|       | (Manual WSAD / Auto)  |  |
+|  +--------------------+        +---------------+       +-----------+-----------+  |
+|                                                                    |              |
+|                                                                    v              |
+|                                                        +-----------------------+  |
+|                                                        |      robot_api.py     |  |
+|                                                        | (/cmd_vel / UDP ESP)  |  |
+|                                                        +-----------+-----------+  |
++--------------------------------------------------------------------|--------------+
+                                                                     | (Wi-Fi UDP)
+                                                                     v
++-----------------------------------------------------------------------------------+
+|                                   ROBOT FISIK                                     |
+|                                                                                   |
+|  +---------------------+      (Kabel UART2)       +----------------------------+  |
+|  | ESP32-CAM           | -----------------------> | ESP32 SISTEM KONTROL       |  |
+|  | (SoftAP + Streamer) |                          | (Driver L298N & Servo)     |  |
+|  +---------------------+                          +----------------------------+  |
++-----------------------------------------------------------------------------------+
 ```
 
-1. **Laptop (Pusat Komputasi Vision & Logika Navigation)**:
-   - Menerima image feed dari kamera Gazebo (`/camera/image_raw`) atau stream HTTP MJPEG dari ESP32-CAM fisik (`http://<IP_ESP32_CAM>/stream`).
-   - Node `visionTarget.py` memproses deteksi warna HSV, penjejakan *CSRT Tracker*, dan kalkulasi galat posisi (*error offset*).
-   - Menghasilkan perintah kecepatan `cmd_vel` (linier & angular) serta perintah servo.
-2. **ESP32 (Sistem Kontrol Hardware)**:
-   - Berfungsi sebagai aktuator kontroler yang menerima sinyal `/cmd_vel` via `rosserial` atau Wi-Fi UDP Socket.
-   - Mengendalikan PWM motor DC kiri & kanan serta servo penumpuk kubus.
-
----
-
-## 2. Spesifikasi Teknis
-
-### A. Arena AutoStack (`autostack_arena.world`)
-- **Spanduk Total**: $350 \times 280\text{ cm}$ ($3.5\text{ m} \times 2.8\text{ m}$).
-- **Ring Lingkaran**:
-  - Diameter luar: $\varnothing 200\text{ cm}$ (Radius $1.0\text{ m}$).
-  - Diameter dalam: $\varnothing 160\text{ cm}$ (Radius $0.8\text{ m}$).
-- **3 Base Tim**: Merah (Selatan), Hijau (Barat), Biru (Timur) ukuran $90 \times 70\text{ cm}$.
-- **Pad Stacking (Kuning)**: Ukuran $40 \times 40\text{ cm}$ di ujung setiap base tim.
-- **Gerbang (Gate)**: Lebar $45\text{ cm}$ ke area ring.
-
-### B. Objek Kubus (`cube_red`, `cube_green`, `cube_blue`)
-- **Dimensi**: $50 \times 50 \times 50\text{ mm}$ ($0.05\text{ m}$).
-- **Massa**: $30\text{ gram}$ ($0.03\text{ kg}$).
-- **Warna**: Merah, Hijau, Biru (8 buah untuk masing-masing warna).
-
-### C. Robot Dummy (`dummy_robot.urdf.xacro`)
-- **Footprint Awal**: $22 \times 22\text{ cm}$ (Batas maks: $25 \times 25\text{ cm}$).
-- **Tinggi Maksimum**: $40\text{ cm}$ (Batas maks: $45\text{ cm}$).
-- **Penggerak**: Differential Drive (2 roda penggerak + 2 caster).
-- **Mekanisme**: Vertical lift slider & 2-finger gripper servo.
-- **Kamera**: ESP32-CAM Gazebo Camera Sensor (FOV 1.1 rad, resolusi 640x480 @ 30 FPS).
+1. **Laptop (Pusat Komputasi Vision, Kontrol Manual WSAD & Autonavigasi)**:
+   - `vision.py`: Modul OpenCV pengolahan citra RGB (Red, Green, Blue) dengan *Color Switcher* (Tombol `1`: Red, `2`: Green, `3`: Blue).
+   - `robot_api.py`: Modul antarmuka pengiriman perintah gerak & servo ke ROS (`/cmd_vel`) atau Wi-Fi UDP Socket.
+   - `main.py`: Aplikasi utama dengan dukungan **Kontrol Manual Keyboard (WSAD, Gripper J/K, Lift U/I)** serta **Mode Vision Auto Navigasi**.
+2. **ESP32-CAM (Wi-Fi SoftAP & Bridge)**:
+   - `firmware_esp32_cam.ino`: Bertindak sebagai Wi-Fi Access Point (`SSID: AutoStack-ESP-CAM`, IP: `192.168.4.1`), streamer MJPEG `/stream`, dan penerus data kontrol via **Kabel Serial UART2 (TX2/RX2)**.
+3. **ESP32 Sistem Kontrol (Aktuator Motor & Servo)**:
+   - `firmware_esp32_control.ino`: Membaca instruksi serial kabel dari ESP32-CAM, mengendalikan PWM Motor DC (L298N/BTS7960) dan Servo Gripper/Lift.
 
 ---
 
@@ -104,7 +81,8 @@ eksbot2/
 │           ├── package.xml
 │           ├── launch/
 │           │   ├── arena_simulation.launch   # Membuka Gazebo + Arena + Robot + Kubus
-│           │   └── vision_control.launch     # Membuka Node ROS Vision Target
+│           │   ├── vision_control.launch     # Membuka Node ROS Vision Target Lama
+│           │   └── modular_control.launch    # Launch Aplikasi Modular Utama (main.py)
 │           ├── worlds/
 │           │   └── autostack_arena.world     # Definisi dunia simulasi
 │           ├── models/
@@ -115,9 +93,13 @@ eksbot2/
 │           ├── urdf/
 │           │   └── dummy_robot.urdf.xacro    # URDF Robot Dummy & Sensor
 │           └── scripts/
-│               ├── generate_arena_texture.py # Renderer tekstur arena.png
-│               ├── visionTarget.py           # Core Vision & Control ROS Node
-│               └── esp32_firmware_example.ino # Firmware Arduino/ESP32
+│               ├── main.py                   # Aplikasi Utama (Manual WSAD & Auto Navigasi)
+│               ├── vision.py                 # Core Vision Engine RGB & CSRT Tracker
+│               ├── robot_api.py              # Robot Interface API (ROS / Wi-Fi UDP)
+│               ├── firmware_esp32_cam.ino    # Firmware ESP32-CAM SoftAP & UART Bridge
+│               ├── firmware_esp32_control.ino# Firmware ESP32 Sistem Kontrol Motor/Servo
+│               ├── visionTarget.py           # Single-script Vision (Legacy)
+│               └── esp32_firmware_example.ino# ROSSerial Firmware (Legacy)
 └── spesifikasi/                              # Gambar acuan spesifikasi
 ```
 
@@ -137,73 +119,62 @@ Jalankan script `setup_env.sh` sebelum mengeksekusi `roslaunch`:
 cd /home/fathir/eksbot2
 source setup_env.sh
 ```
-*Script ini secara otomatis mengatur `ROS_MASTER_URI=http://localhost:11311` dan `ROS_IP=127.0.0.1` serta menge-source workspace Catkin.*
-
-Jika ingin menggunakannya untuk robot fisik pada jaringan Wi-Fi:
-```bash
-source setup_env.sh network
-```
 
 ---
 
 ## 5. Cara Menjalankan (Running Guide)
 
-### A. Menjalankan Simulasi Gazebo & Vision (Simulasi)
+### A. Menjalankan Simulasi Gazebo & Control Center (Simulasi)
 
-1. **Buka Terminal dan Setup Environment**:
+1. **Buka Terminal 1 - Jalankan Simulasi Gazebo**:
    ```bash
    cd /home/fathir/eksbot2
    source setup_env.sh
-   cd catkin_ws
-   catkin_make
-   ```
-
-2. **Jalankan Simulasi Gazebo**:
-   ```bash
    roslaunch eksbot_simulation arena_simulation.launch
    ```
-   *Jendela Gazebo akan terbuka menampilkan Arena AutoStack, Robot Dummy, dan 24 Kubus.*
 
-3. **Jalankan Node Vision (Terminal Baru)**:
+2. **Buka Terminal 2 - Jalankan Aplikasi Modular Utama (`main.py`)**:
    ```bash
    cd /home/fathir/eksbot2
    source setup_env.sh
-   roslaunch eksbot_simulation vision_control.launch
+   roslaunch eksbot_simulation modular_control.launch
+   # ATAU jalankan script langsung:
+   # python3 catkin_ws/src/eksbot_simulation/scripts/main.py
    ```
-   *Jendela OpenCV akan terbuka menampilkan feed dari kamera simulasi.*
 
-4. **Cara Mengontrol Target Vision**:
-   - **Klik Mouse**: Klik kiri pada kubus berwarna di jendela OpenCV untuk mengunci (*LOCK*) target tersebut.
-   - **Tombol Angka (1-9)**: Tekan angka 1-9 pada keyboard untuk memilih target terdeteksi.
-   - **Tombol 'R'**: Menghapus kunci target (*RESET / UNLOCK*) dan kembali ke mode deteksi multi-target.
-   - **Tombol 'ESC'**: Keluar dari aplikasi vision.
+3. **Cara Mengontrol Robot via Keyboard & Vision**:
+   - **`M`**: Perpindahan Mode antara **MANUAL WSAD** $\leftrightarrow$ **AUTO VISION NAVIGASI**.
+   - **`W` / `S`**: Maju / Mundur (Mode Manual).
+   - **`A` / `D`**: Belok Kiri / Belok Kanan (Mode Manual).
+   - **`SPACE`**: Stop / Rem Darurat.
+   - **`J` / `K`**: Jepit Gripper (Close) / Buka Gripper (Open).
+   - **`U` / `I`**: Angkat Lift (Up) / Turunkan Lift (Down).
+   - **`1` / `2` / `3`**: Switch Target Warna Vision (`1`: Merah, `2`: Hijau, `3`: Biru).
+   - **`R`**: Reset Lock Target Vision.
+   - **`ESC`**: Keluar dari Aplikasi.
 
 ---
 
-### B. Menjalankan Pada Robot Fisik (ESP32-CAM & ESP32)
+### B. Menjalankan Pada Robot Fisik (ESP32-CAM & ESP32 Sistem Kontrol)
 
-1. **Konfigurasi ESP32-CAM**:
-   - Hubungkan ESP32-CAM ke jaringan Wi-Fi lokal.
-   - Buka file [visionTarget.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/visionTarget.py) dan ubah parameter konfigurasi:
-     ```python
-     USE_ESP_CAM = True
-     ESP_CAM_URL = "http://172.20.10.3/stream"  # Ganti IP sesuai ESP32-CAM Anda
+1. **Flash Firmware ESP32-CAM**:
+   - Buka `catkin_ws/src/eksbot_simulation/scripts/firmware_esp32_cam.ino` di Arduino IDE.
+   - Flash ke ESP32-CAM. Board akan memancarkan Wi-Fi Access Point `AutoStack-ESP-CAM` (Pass: `12345678`).
+
+2. **Flash Firmware ESP32 Sistem Kontrol**:
+   - Buka `catkin_ws/src/eksbot_simulation/scripts/firmware_esp32_control.ino` di Arduino IDE.
+   - Hubungkan kabel Hardware Serial UART2:
+     - **ESP32-CAM Pin 17 (TX2)** $\rightarrow$ **ESP32 Control Pin 16 (RX2)**.
+     - **ESP32-CAM Pin 16 (RX2)** $\rightarrow$ **ESP32 Control Pin 17 (TX2)**.
+     - **GND** ESP32-CAM terhubung ke **GND** ESP32 Control.
+   - Flash ke ESP32 Sistem Kontrol.
+
+3. **Jalankan Aplikasi Laptop**:
+   - Hubungkan Wi-Fi Laptop ke `AutoStack-ESP-CAM`.
+   - Jalankan `main.py`:
+     ```bash
+     python3 catkin_ws/src/eksbot_simulation/scripts/main.py
      ```
-
-2. **Upload Firmware ke ESP32**:
-   - Buka [esp32_firmware_example.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/esp32_firmware_example.ino) di Arduino IDE.
-   - Sesuaikan PIN motor driver (IN1, IN2, ENA, IN3, IN4, ENB) dan servo.
-   - Flash ke board ESP32.
-
-3. **Jalankan ROS Serial Bridge di Laptop**:
-   ```bash
-   rosrun rosserial_python serial_node.py _port:=/dev/ttyUSB0 _baud:=115200
-   ```
-
-4. **Jalankan Vision Node**:
-   ```bash
-   rosrun eksbot_simulation visionTarget.py
-   ```
 
 ---
 

@@ -1,0 +1,7 @@
+<launch>
+  <!-- Launch ROS Modular Control Main Node -->
+  <node name="eksbot2_modular_main" pkg="eksbot_simulation" type="main.py" output="screen">
+    <param name="use_sim" value="true" />
+    <param name="image_topic" value="/camera/image_raw" />
+  </node>
+</launch>

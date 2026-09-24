@@ -5,3 +5,4 @@ Dokumentasi lengkap paket ROS `eksbot_simulation` untuk simulasi Gazebo, robot d
 Silakan baca:
 - [README.md Utama](file:///home/fathir/eksbot2/README.md) di direktori utama repository untuk panduan running, network setup, tuning, dan arsitektur teknis lengkap.
 - [PROGRESS_REPORT.md Log History](file:///home/fathir/eksbot2/PROGRESS_REPORT.md) untuk melihat histori prompt dan progres pengerjaan AI.
+}

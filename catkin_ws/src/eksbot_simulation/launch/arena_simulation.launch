@@ -12,8 +12,8 @@
   <!-- Load Robot Description URDF -->
   <param name="robot_description" command="$(find xacro)/xacro '$(find eksbot_simulation)/urdf/dummy_robot.urdf.xacro'" />
 
-  <!-- Spawn Robot Dummy into Gazebo -->
-  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-param robot_description -urdf -model dummy_robot -x 0 -y 0 -z 0.05" respawn="false" output="screen" />
+  <!-- Spawn Robot Dummy into Gazebo (Spawn di Arena Base Biru: East Base x=1.35, y=0.0, Yaw=3.14159 rad) -->
+  <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-param robot_description -urdf -model dummy_robot -x 1.35 -y 0.0 -z 0.05 -Y 3.14159" respawn="false" output="screen" />
 
   <!-- Robot State Publisher -->
   <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
