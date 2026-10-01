@@ -101,6 +101,7 @@ eksbot2/
 │               ├── visionTarget.py           # Single-script Vision (Legacy)
 │               └── esp32_firmware_example.ino# ROSSerial Firmware (Legacy)
 └── spesifikasi/                              # Gambar acuan spesifikasi
+└── tes_manual_control/                       # Program khusus uji manual robot (Direct Wi-Fi ESP32, tanpa kamera)
 ```
 
 ---

@@ -24,9 +24,9 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 # Preset HSV Warna RGB
 COLOR_PRESETS = {
-    "RED": (np.array([0, 100, 100]), np.array([10, 255, 255]), (0, 0, 255)),
-    "GREEN": (np.array([35, 100, 100]), np.array([85, 255, 255]), (0, 255, 0)),
-    "BLUE": (np.array([100, 100, 100]), np.array([130, 255, 255]), (255, 100, 0))
+    "RED": (np.array([0, 50, 50]), np.array([10, 255, 255]), (0, 0, 255)),
+    "GREEN": (np.array([35, 50, 50]), np.array([85, 255, 255]), (0, 255, 0)),
+    "BLUE": (np.array([100, 50, 50]), np.array([130, 255, 255]), (255, 100, 0))
 }
 
 class ESPCamStream:

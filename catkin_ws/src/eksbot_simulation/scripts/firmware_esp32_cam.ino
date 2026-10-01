@@ -37,7 +37,7 @@
 #define UART2_RX_PIN      16
 
 // CONFIG WI-FI SOFTAP
-const char* AP_SSID = "AutoStack-ESP-CAM";
+const char* AP_SSID = "dimas_asoy_geboy";
 const char* AP_PASS = "12345678";
 const int UDP_PORT = 8888;
 

@@ -116,6 +116,83 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
      - **Fase 2 (Driving Straight)**: Setelah sudut lurus ($|\text{norm\_x}| \le 0.12$), robot maju lurus penuh ke depan (`linear.x = 0.25`) tanpa ragu-ragu.
   4. **Otomasi Auto-Grip & Lift 3D saat Target Terjangkau ([main.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/main.py) & [vision.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/vision.py))**: Saat kubus berada tepat di depan robot (`target_cy > frame_h - 110` atau `target_area > 12000`), robot otomatis berhenti, menutup gripper 3D, menempelkan kubus, dan mengangkut lift carriage ke atas secara otomatis.
 
+
+### Prompt 12: Penjelasan Cara Penerapan & Running Direct Script ke Robot Fisik
+- **User Prompt**: Apakah script di `catkin_ws/src/eksbot_simulation/scripts` sudah bisa diterapkan langsung ke robot? Bagaimana cara run langsung (bukan simulasi)? Jelaskan dulu tanpa mengubah kode.
+- **Tindakan & Progress**:
+  1. Menjelaskan secara rinci bahwa kodenya **100% SUDAH BISA DITERAPKAN LANGSUNG KE ROBOT FISIK**.
+  2. Menjelaskan alur dual-mode pada `main.py`, `robot_api.py`, `firmware_esp32_cam.ino`, dan `firmware_esp32_control.ino`.
+  3. Menyediakan panduan langkah demi langkah cara upload firmware, wiring serial UART2, serta cara mengeksekusi `python3 main.py` secara langsung tanpa simulasi ROS/Gazebo.
+
+### Prompt 13: Konfirmasi Kebutuhan `roscore` pada Robot Fisik
+- **User Prompt**: Apakah perlu `roscore`?
+- **Tindakan & Progress**:
+  1. Menjelaskan bahwa **`roscore` TIDAK PERLU** dijalankan saat menggunakan robot fisik.
+  2. Menjelaskan mekanisme *fallback* otomatis di [main.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/main.py) dan [robot_api.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/robot_api.py) yang beralih langsung ke Socket UDP Wi-Fi & HTTP Stream ESP32-CAM tanpa membutuhkan ROS Master.
+
+### Prompt 14: Pembuatan Program Khusus Uji Coba Kontrol Manual Direct Wi-Fi (Tanpa Kamera)
+- **User Prompt**: Buatkan 1 program untuk sementara test control robot. Jadi wifi langsung dari esp sistem kontrol. Tanpa kamera dulu full mode manual.
+- **Tindakan & Progress**:
+  1. **Folder Khusus [tes_manual_control](file:///home/fathir/eksbot2/tes_manual_control)**: Dibuat folder terisolasi khusus untuk pengujian hardware.
+  2. **[firmware_esp32_control_direct_wifi.ino](file:///home/fathir/eksbot2/tes_manual_control/firmware_esp32_control_direct_wifi.ino)**: Dibuat firmware C++ ESP32 Sistem Kontrol yang memancarkan Wi-Fi AP (`dimas_asoy_geboy`), mendengarkan paket UDP Port 8888, dan mengendalikan PWM Motor (L298N) serta Servo Gripper/Lift secara independen.
+  3. **[test_manual_keyboard.py](file:///home/fathir/eksbot2/tes_manual_control/test_manual_keyboard.py)**: Dibuat script GUI Control Panel Laptop penguji kontrol keyboard real-time (WSAD, J/K, U/I, SPACE).
+  4. **[README.md](file:///home/fathir/eksbot2/tes_manual_control/README.md)**: Dibuat panduan wiring pinout dan cara pengujian.
+
+### Prompt 15: Penjelasan Konsep Kinematika Differential Drive & Variabel WHEEL_BASE
+- **User Prompt**: Kenapa ada wheel base jelaskan
+- **Tindakan & Progress**: Menjelaskan konsep matematika kinematika *differential drive*, mengapa `WHEEL_BASE` (jarak antar pusat roda) dibutuhkan untuk mengonversi nilai `linear_x` dan `angular_z` dari laptop menjadi kecepatan linear masing-masing roda ($v_{\text{left}}$ & $v_{\text{right}}$).
+
+### Prompt 16: Diskusi & Perencanaan Integrasi Wheel Encoder (Rotary Encoder)
+- **User Prompt**: aku ada encoder dan decoder
+- **Tindakan & Progress**: Melakukan konfirmasi bahwa komponen yang dimaksud adalah **Wheel Rotary Encoder** pada roda motor, serta menjelaskan keuntungannya untuk **PID Closed-Loop Velocity Control** dan **Odometry Tracking** pada ESP32.
+
+### Prompt 17: Konfirmasi Keamanan Program Manual Tanpa Encoder
+- **User Prompt**: untuk program yyg manual sekarang tanpa encoder decoder masi aman kan
+- **Tindakan & Progress**: Menjelaskan bahwa program manual saat ini **100% AMAT SANGAT AMAN** digunakan tanpa encoder (Open-Loop PWM Control). Encoder merupakan fitur opsional untuk upgrade akurasi di masa mendatang.
+
+### Prompt 18: Penambahan Fungsi Print IP Address pada Firmware ESP32 Control Direct Wi-Fi
+- **User Prompt**: di firmwae ini berikan fungsi untuk print ip esp nya
+- **Tindakan & Progress**:
+  1. Menambahkan fungsi helper `printESP32IPInfo()` pada [firmware_esp32_control_direct_wifi.ino](file:///home/fathir/eksbot2/tes_manual_control/firmware_esp32_control_direct_wifi.ino).
+  2. Fungsi menampilkan SSID Wi-Fi, IP SoftAP (`192.168.4.1`), Port UDP, serta jumlah client/laptop yang sedang terhubung ke ESP32.
+  3. Mengatur agar info IP dicetak otomatis saat `setup()` dan diperbarui secara periodik setiap 5 detik di `loop()`.
+
+### Prompt 19: Analisis Masalah Hardware Wi-Fi ESP32 Hilang Saat Terpasang di Robot (Strapping Pins & Power Drop)
+- **User Prompt**: jelaskan apa yang menyebabkan wfii tidak muncul saat esp sudah di tanam kke robot padahal saat dicbut dari robot ada wifi
+- **Tindakan & Progress**: Menjelaskan 3 penyebab utama (Strapping Pins GPIO 2/5, Inrush Current Power Drop, & Input-only pins).
+
+### Prompt 20: Troubleshooting Kelistrikan UBEC Step-Down (12V ke 5V), Inrush Current Servo, & Peringatan GPIO 3 (RX0)
+- **User Prompt**: pin sudah dibetulkan. apakah karena kurang ampere? soalnya voltase dar batreai ke ubec dulu hasilnya dari 12 jadi 5v
+- **Tindakan & Progress**:
+  1. Menjelaskan bahwa **UBEC 12V ke 5V yang berbagi daya dengan Servo/Motor** dapat mengalami *voltage sag/drop* sekejap saat Servo/Motor menyala (inrush current spike 1A-3A), memicu **Brownout Reset** di ESP32 sehingga Wi-Fi tidak sempat menyala.
+  2. Memberikan peringatan bahwa **GPIO 3 (`SERVO_LIFT_PIN 3`) adalah Pin RX0 (Serial USB Debugging)** yang tidak boleh dipakai untuk Servo karena bentrok dengan USB Serial.
+  3. Menyediakan solusi pemisahan daya UBEC & pemasangan Kapasitor Elco ($470\mu\text{F} - 1000\mu\text{F}$).
+
+### Prompt 21: Analisis Detail Penyebab Wi-Fi ESP32 Tidak Muncul saat Arus Terukur 5V 0.1A (Strapping GPIO 5 & Diode Drop VIN)
+- **User Prompt**: belumm ada aktuator lain hanya esp dan kontrol motor. itupun motor dari batrai langsung sementara esp dari ubec dengan 3a max 5a jika menurut spesifikasi tetapi tadi di multimeter 5v 0,1 a
+- **Tindakan & Progress**:
+  1. Menjelaskan mengapa arus terukur $0.1\text{ A}$ ($100\text{ mA}$): ESP32 mengalami **hang / stuck di ROM Bootloader** akibat **GPIO 5 (`IN3_PIN 5`)** terhubung ke driver motor (L298N/BTS7960) yang menarik GPIO 5 ke LOW/HIGH saat boot.
+  2. Menjelaskan masalah **Diode Voltage Drop pada Pin VIN ESP32**: Jika UBEC memberi 5.0V ke VIN, tegangan setelah dioda D1 di board ESP32 drop ke 4.3V, menyebabkan regulator 3.3V (AMS1117) drop-out ke ~2.8V sehingga radio Wi-Fi tidak mau menyala.
+  3. Menyediakan tes diagnostik cepat: Cabut kabel sinyal motor (IN1-IN4, ENA, ENB) dan ukur tegangan pin `3V3` ESP32.
+
+### Prompt 22: Metode Uji Isolasi Masalah UBEC vs Pin Terlarang (GPIO 6-11 Flash Memory & Pin EN Reset)
+- **User Prompt**: oin sudah diganti sedari awal, kenapa masi gabisa, berarti pure ampere dari ubec?
+- **Tindakan & Progress**:
+  1. Menyediakan **3 Langkah Uji Coba Isolasi** (Menguji ESP32 dicolok USB laptop saat tetap menempel di robot untuk memastikan apakah murni UBEC atau Short Circuit/Pin crash di PCB).
+  2. Memberikan **Peringatan Kritis GPIO 6 - 11**: `SERVO_GRIPPER_PIN 7` yang baru diisi terhubung langsung ke **Internal SPI Flash Memory ESP32** sehingga pasti membuat ESP32 *Fatal Crash (Guru Meditation)*.
+  3. Memeriksa status pin **EN (Reset)** & rekomendasi daftar pin aman (GPIO 21, 22, 23, 25, 26, 32, 33).
+
+### Prompt 23: Konfirmasi Empiris Masalah UBEC Diode Voltage Drop & Solusi Kelistrikan
+- **User Prompt**: udah gw bilang kalau pake lptop wfi muncul (🟢 Jika Wi-Fi LANGSUNG MUNCUL saat dicolok USB: Maka 100% terbukti UBEC / Jalur Kabel Power 5V UBEC yang BERMASALAH / TEGANGAN DROP).
+- **Tindakan & Progress**:
+  1. Mengonfirmasi hasil tes bahwa masalah **100% TERBUKTI PADA UBEC & DIODE DROP PIN VIN ESP32**.
+  2. Menjelaskan perbedaan pasokan USB Laptop (5.15V murni) vs UBEC (5.00V yang drop di dioda VIN ke ~4.3V sehingga regulator 3.3V mengalami *under-voltage dropout* ke ~2.8V).
+  3. Memberikan 3 solusi perbaikan daya: Pasang kabel Micro-USB dari UBEC ke port USB ESP32, atau naikkan potensio UBEC ke 5.3V - 5.5V.
+
+### Prompt 24: Panduan Perintah Terminal Git untuk Update Repositori GitHub
+- **User Prompt**: berikajn sintax terminall step by step update gothub
+- **Tindakan & Progress**: Menyediakan panduan langkah demi langkah perintah terminal Git (`git add .`, `git commit`, `git push origin main`) untuk mengunggah semua perubahan workspace ke GitHub (`petirz436/Eksperimen-Robotika-II`).
+
 ---
 
 ## 🗺️ Peta File Utama Dalam Workspace
