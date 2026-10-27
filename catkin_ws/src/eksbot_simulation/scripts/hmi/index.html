@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eksbot2 HMI - Pilot Console</title>
+<meta name="description" content="HMI pilot Eksbot2: live stream kamera, HUD target lock CSRT, kontrol keyboard, audio feedback, flight data recorder, dan tuner HSV.">
+<style>
+  /* Desain flat: tanpa gradasi. Tema terang = putih, tema gelap = hitam, tombol warna soft. */
+  :root, [data-theme="light"] {
+    --bg: #ffffff; --panel: #f5f5f6; --border: #e3e3e6; --text: #1d1d20; --muted: #6e6e76;
+    --b-gray: #ececef;  --t-gray: #2f2f35;
+    --b-blue: #d6e6f7;  --t-blue: #234a72;
+    --b-green: #d6efdd; --t-green: #24583a;
+    --b-red: #f6d6d6;   --t-red: #7a2a2a;
+    --b-amber: #f6e8c8; --t-amber: #6b4f12;
+    --b-violet: #e5ddf5;--t-violet: #4a3878;
+    --active: #1d1d20;  --active-t: #ffffff;
+    --video-bg: #e9e9ec;
+  }
+  [data-theme="dark"] {
+    --bg: #000000; --panel: #101012; --border: #26262b; --text: #ededf0; --muted: #9a9aa3;
+    --b-gray: #1d1d21;  --t-gray: #d6d6dc;
+    --b-blue: #1b2d40;  --t-blue: #b9d4f0;
+    --b-green: #1b3326; --t-green: #b5e2c3;
+    --b-red: #3d1f22;   --t-red: #f0c2c2;
+    --b-amber: #3a2f17; --t-amber: #f0dcae;
+    --b-violet: #2a2340;--t-violet: #d3c7f2;
+    --active: #ededf0;  --active-t: #000000;
+    --video-bg: #0a0a0b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+    border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 650; }
+  .pill { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--b-gray); color: var(--t-gray); }
+  .pill.ok { background: var(--b-green); color: var(--t-green); }
+  .pill.bad { background: var(--b-red); color: var(--t-red); }
+  .pill.warn { background: var(--b-amber); color: var(--t-amber); }
+  .spacer { flex: 1; }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; padding: 12px; min-height: 0; }
+  #videoWrap {
+    position: relative; background: var(--video-bg); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; min-height: 300px;
+  }
+  #video, #hud { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #video { object-fit: contain; }
+  #hud { cursor: crosshair; }
+  aside { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; }
+  section.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  section.card h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row + .row { margin-top: 6px; }
+  button {
+    border: 1px solid transparent; border-radius: 8px; padding: 8px 10px; font: inherit; font-weight: 600;
+    cursor: pointer; background: var(--b-gray); color: var(--t-gray); flex: 1; min-width: 0;
+    transition: transform .06s ease, filter .12s ease, box-shadow .12s ease;
+  }
+  button:hover { filter: brightness(0.96); }
+  [data-theme="dark"] button:hover { filter: brightness(1.18); }
+  button:active, button.held { transform: scale(0.96); }
+  button.blue { background: var(--b-blue); color: var(--t-blue); }
+  button.green { background: var(--b-green); color: var(--t-green); }
+  button.red { background: var(--b-red); color: var(--t-red); }
+  button.amber { background: var(--b-amber); color: var(--t-amber); }
+  button.violet { background: var(--b-violet); color: var(--t-violet); }
+  button.on { outline: 2px solid var(--active); outline-offset: -2px; }
+  button.held {
+    outline: 2px solid var(--active) !important;
+    outline-offset: -2px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.18);
+  }
+  [data-theme="dark"] button.held {
+    box-shadow: 0 0 12px rgba(255,255,255,0.22);
+  }
+  @keyframes keyPulse {
+    0% { transform: scale(0.94); filter: brightness(1.25); }
+    50% { transform: scale(1.03); }
+    100% { transform: scale(1.0); }
+  }
+  .pulse { animation: keyPulse 0.16s cubic-bezier(0.16, 1, 0.3, 1); }
+  .rec-active {
+    background: var(--b-red) !important;
+    color: var(--t-red) !important;
+  }
+  .hdr-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+  .dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .rec-active .dot {
+    background: #ff3b3b;
+    animation: blinkRec 0.8s infinite alternate;
+  }
+  @keyframes blinkRec {
+    0% { opacity: 1; }
+    100% { opacity: 0.2; }
+  }
+  button.estop { background: var(--b-red); color: var(--t-red); font-size: 15px; padding: 11px; }
+  kbd {
+    display: inline-block; min-width: 20px; padding: 0 5px; border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 5px; font: 600 11px/18px ui-monospace, monospace; text-align: center; background: var(--bg); color: var(--text);
+  }
+  button kbd { margin-left: 4px; opacity: .8; }
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .pad .blank { visibility: hidden; }
+  .telem { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font: 12px/1.5 ui-monospace, monospace; }
+  .telem span:nth-child(odd) { color: var(--muted); }
+  label.ctl { display: grid; grid-template-columns: 78px 1fr 38px; align-items: center; gap: 6px; font-size: 12px; margin-top: 6px; }
+  label.ctl output { text-align: right; font-family: ui-monospace, monospace; }
+  select, input[type=range] { width: 100%; accent-color: var(--t-blue); }
+  select { padding: 5px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; }
+  .row-link {
+    display: block; width: 100%; text-align: center; text-decoration: none; padding: 8px 10px;
+    border-radius: 8px; font-weight: 600; font-size: 13px; background: var(--b-blue); color: var(--t-blue);
+    border: 1px solid transparent; transition: filter .12s ease;
+  }
+  .row-link:hover { filter: brightness(0.95); }
+  #legend {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); z-index: 10;
+  }
+  #legend.show { display: flex; }
+  #legend .box { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; width: min(740px, 94vw); max-height: 90vh; overflow: auto; }
+  #legend table { width: 100%; border-collapse: collapse; }
+  #legend td { padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  #legend td:first-child { white-space: nowrap; width: 44%; }
+  #legend h3 { margin: 14px 0 4px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } #videoWrap { min-height: 56vw; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Eksbot2 Pilot Console</h1>
+  <span id="pLink" class="pill bad">LINK ?</span>
+  <span id="pBatt" class="pill ok">BATT 12.0V · 95%</span>
+  <span id="pMode" class="pill">MANUAL</span>
+  <span id="pPhase" class="pill">IDLE</span>
+  <span id="pFps" class="pill">0 FPS</span>
+  <span class="spacer"></span>
+  <span id="pSrc" class="pill">-</span>
+  <button id="btnRec" class="hdr-btn" title="Rekam sesi &amp; blackbox telemetri (O)"><span id="recDot" class="dot"></span> REC <kbd>O</kbd></button>
+  <button id="btnAudio" class="hdr-btn" title="Audio Sound Cues (P)">Audio <kbd>P</kbd></button>
+  <button id="btnTheme" class="hdr-btn" title="Ganti tema (T)">Tema <kbd>T</kbd></button>
+  <button id="btnLegend" class="hdr-btn" title="Legenda tombol (H)">Bantuan <kbd>H</kbd></button>
+</header>
+
+<main>
+  <div id="videoWrap">
+    <img id="video" alt="Live stream kamera robot" src="/stream.mjpg">
+    <canvas id="hud"></canvas>
+  </div>
+
+  <aside>
+    <section class="card">
+      <button id="btnEstop" class="estop" style="width:100%">E-STOP <kbd>Space</kbd></button>
+    </section>
+
+    <section class="card">
+      <h2>Mode &amp; Target</h2>
+      <div class="row">
+        <button id="btnManual" class="blue" data-mode="MANUAL">Manual</button>
+        <button id="btnAuto" class="violet" data-mode="AUTO">Auto</button>
+        <button id="btnToggle" style="flex:0" title="Ganti mode (M)">M</button>
+      </div>
+      <div class="row">
+        <button id="btnRed" class="red" data-color="RED">Merah <kbd>1</kbd></button>
+        <button id="btnGreen" class="green" data-color="GREEN">Hijau <kbd>2</kbd></button>
+      </div>
+      <div class="row">
+        <button id="btnBlue" class="blue" data-color="BLUE">Biru <kbd>3</kbd></button>
+        <button id="btnYellow" class="amber" data-color="YELLOW">Kuning <kbd>4</kbd></button>
+      </div>
+      <div class="row">
+        <button id="btnCancel" class="amber">Batalkan target <kbd>R</kbd></button>
+      </div>
+      <div class="hint">Klik objek pada video untuk LOCK (otomatis masuk AUTO). Tekan tombol gerak saat AUTO = ambil alih manual.</div>
+    </section>
+
+    <section class="card">
+      <h2>Kemudi</h2>
+      <div class="pad">
+        <span class="blank"></span>
+        <button id="padW" data-key="KeyW">Maju <kbd>W</kbd></button>
+        <span class="blank"></span>
+        <button id="padA" data-key="KeyA">Kiri <kbd>A</kbd></button>
+        <button id="padStop" class="red">Stop</button>
+        <button id="padD" data-key="KeyD">Kanan <kbd>D</kbd></button>
+        <span class="blank"></span>
+        <button id="padS" data-key="KeyS">Mundur <kbd>S</kbd></button>
+        <span class="blank"></span>
+      </div>
+      <div class="row">
+        <button id="btnSpdDn" title="Kurangi kecepatan">Speed - <kbd>-</kbd></button>
+        <button id="btnSpdUp" title="Tambah kecepatan">Speed + <kbd>=</kbd></button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Gripper &amp; Lift</h2>
+      <div class="row">
+        <button id="btnGripClose" class="green">Jepit <kbd>J</kbd></button>
+        <button id="btnGripOpen">Buka <kbd>K</kbd></button>
+      </div>
+      <div class="row">
+        <button id="btnLiftUp" class="blue">Lift naik <kbd>U</kbd></button>
+        <button id="btnLiftDown">Lift turun <kbd>I</kbd></button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Crosshair / Titik bidik</h2>
+      <div class="row">
+        <button id="btnXhair" title="Tampil/sembunyi (C)">Tampil <kbd>C</kbd></button>
+        <button id="btnXhairReset" title="Reset (Shift+C)">Reset <kbd>⇧C</kbd></button>
+      </div>
+      <label class="ctl">Gaya
+        <select id="xStyle"><option value="cross">Cross</option><option value="gapcross">Cross bercelah</option><option value="dot">Titik</option><option value="circle">Lingkaran</option></select><span></span>
+      </label>
+      <label class="ctl">Warna
+        <select id="xColor"><option value="lime">Lime</option><option value="red">Merah</option><option value="cyan">Cyan</option><option value="yellow">Kuning</option><option value="white">Putih</option><option value="black">Hitam</option></select><span></span>
+      </label>
+      <label class="ctl">Ukuran <input id="xSize" type="range" min="4" max="120"><output id="oSize"></output></label>
+      <label class="ctl">Celah <input id="xGap" type="range" min="0" max="60"><output id="oGap"></output></label>
+      <label class="ctl">Tebal <input id="xThick" type="range" min="1" max="6"><output id="oThick"></output></label>
+      <label class="ctl">Offset X <input id="xDx" type="range" min="-160" max="160"><output id="oDx"></output></label>
+      <label class="ctl">Offset Y <input id="xDy" type="range" min="-120" max="120"><output id="oDy"></output></label>
+      <div class="hint">Offset = titik bidik untuk navigasi AUTO (kalibrasi kamera miring / posisi gripper). Geser halus: <kbd>Shift</kbd>+panah.</div>
+    </section>
+
+    <section class="card" id="cardHsv">
+      <h2>HSV Tuner (Kalibrasi Warna)</h2>
+      <div class="row">
+        <select id="hsvColor">
+          <option value="RED">Target: Merah (RED)</option>
+          <option value="GREEN">Target: Hijau (GREEN)</option>
+          <option value="BLUE">Target: Biru (BLUE)</option>
+          <option value="YELLOW">Target: Kuning (YELLOW)</option>
+        </select>
+        <button id="btnHsvReset" style="flex:0" title="Reset default preset">Reset</button>
+      </div>
+      <label class="ctl">H Min <input id="hMin" type="range" min="0" max="179"><output id="oHMin"></output></label>
+      <label class="ctl">H Max <input id="hMax" type="range" min="0" max="179"><output id="oHMax"></output></label>
+      <label class="ctl">S Min <input id="sMin" type="range" min="0" max="255"><output id="oSMin"></output></label>
+      <label class="ctl">S Max <input id="sMax" type="range" min="0" max="255"><output id="oSMax"></output></label>
+      <label class="ctl">V Min <input id="vMin" type="range" min="0" max="255"><output id="oVMin"></output></label>
+      <label class="ctl">V Max <input id="vMax" type="range" min="0" max="255"><output id="oVMax"></output></label>
+      <div class="hint">Tuner threshold warna arena secara real-time tanpa restart program.</div>
+    </section>
+
+    <section class="card">
+      <h2>Developer &amp; Servis</h2>
+      <div class="row">
+        <a id="btnOta" class="row-link" href="http://192.168.4.1/update" target="_blank" rel="noopener">OTA Firmware Update (ESP32) ↗</a>
+      </div>
+      <div class="hint">Upload biner .bin langsung via Wi-Fi tanpa mencopot kabel robot.</div>
+    </section>
+
+    <section class="card">
+      <h2>Telemetri</h2>
+      <div class="telem" id="telem"></div>
+    </section>
+  </aside>
+</main>
+
+<div id="legend" role="dialog" aria-label="Legenda tombol">
+  <div class="box">
+    <h2 style="margin:0 0 6px">Legenda Tombol</h2>
+    <h3>Gerak (tahan)</h3>
+    <table>
+      <tr><td><kbd>W</kbd> / <kbd>↑</kbd></td><td>Maju</td></tr>
+      <tr><td><kbd>S</kbd> / <kbd>↓</kbd></td><td>Mundur</td></tr>
+      <tr><td><kbd>A</kbd> / <kbd>←</kbd></td><td>Belok kiri (putar di tempat)</td></tr>
+      <tr><td><kbd>D</kbd> / <kbd>→</kbd></td><td>Belok kanan (putar di tempat)</td></tr>
+      <tr><td><kbd>W</kbd>+<kbd>A</kbd> dst.</td><td>Maju sambil belok (busur)</td></tr>
+      <tr><td>Lepas semua tombol</td><td>Robot berhenti</td></tr>
+    </table>
+    <h3>Aksi (sekali tekan)</h3>
+    <table>
+      <tr><td><kbd>Space</kbd></td><td>E-STOP: berhenti, lepas lock, kembali MANUAL</td></tr>
+      <tr><td><kbd>M</kbd></td><td>Ganti mode MANUAL / AUTO</td></tr>
+      <tr><td><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></td><td>Target warna Merah / Hijau / Biru / Kuning</td></tr>
+      <tr><td>Klik video</td><td>Lock target (CSRT) dan masuk AUTO</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Batalkan target</td></tr>
+      <tr><td><kbd>J</kbd> / <kbd>K</kbd></td><td>Gripper jepit / buka</td></tr>
+      <tr><td><kbd>U</kbd> / <kbd>I</kbd></td><td>Lift naik / turun</td></tr>
+      <tr><td><kbd>=</kbd> / <kbd>-</kbd></td><td>Kecepatan naik / turun (30% - 150%)</td></tr>
+      <tr><td><kbd>O</kbd></td><td>Toggle Rekam Video HUD &amp; Blackbox Telemetry (CSV)</td></tr>
+      <tr><td><kbd>P</kbd></td><td>Toggle Audio Feedback (Suara radar &amp; alarm)</td></tr>
+    </table>
+    <h3>Tampilan &amp; Kalibrasi</h3>
+    <table>
+      <tr><td><kbd>C</kbd></td><td>Crosshair tampil / sembunyi</td></tr>
+      <tr><td><kbd>Shift</kbd>+panah (<kbd>Alt</kbd> = 5 px)</td><td>Geser titik bidik 1 px</td></tr>
+      <tr><td><kbd>Shift</kbd>+<kbd>C</kbd></td><td>Reset crosshair</td></tr>
+      <tr><td><kbd>T</kbd></td><td>Tema terang / gelap</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Layar penuh video</td></tr>
+      <tr><td><kbd>H</kbd> / <kbd>Esc</kbd></td><td>Buka / tutup legenda</td></tr>
+    </table>
+    <div class="row" style="margin-top:12px"><button id="btnLegendClose">Tutup</button></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const video = $("video"), hud = $("hud"), ctx = hud.getContext("2d");
+let state = null, serverOk = false;
+
+// ------------------------------------------------------------ API
+function post(path, body) {
+  return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+    .catch(() => {});
+}
+const action = (name, value) => post("/api/action", { name, value });
+
+// ------------------------------------------------------------ Tema
+function setTheme(t) { document.documentElement.dataset.theme = t; localStorage.setItem("eksbot2-theme", t); }
+setTheme(localStorage.getItem("eksbot2-theme") || "light");
+const toggleTheme = () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+const toggleLegend = (force) => $("legend").classList.toggle("show", force);
+
+// ------------------------------------------------------------ Audio Sound Cues (Web Audio API)
+let audioCtx = null;
+let audioEnabled = localStorage.getItem("eksbot2-audio") !== "false";
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) audioCtx = new AudioContext();
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function updateAudioButton() {
+  $("btnAudio").textContent = (audioEnabled ? "🔊 Audio" : "🔇 Mute") + " [P]";
+  $("btnAudio").classList.toggle("on", audioEnabled);
+}
+updateAudioButton();
+
+function toggleAudio() {
+  getAudioContext();
+  audioEnabled = !audioEnabled;
+  localStorage.setItem("eksbot2-audio", audioEnabled);
+  updateAudioButton();
+  if (audioEnabled) playTone(880, "sine", 0.08, 0, 0.15);
+}
+
+function playTone(freq, type, duration, delay = 0, gainLevel = 0.16) {
+  if (!audioEnabled) return;
+  try {
+    const actx = getAudioContext();
+    if (!actx) return;
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    const t = actx.currentTime + delay;
+    osc.type = type || "sine";
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(gainLevel, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start(t);
+    osc.stop(t + duration);
+  } catch (e) {}
+}
+
+function soundLock() {
+  // Dual sharp chirps radar jet-tempur lock-on
+  playTone(980, "sine", 0.08, 0, 0.22);
+  playTone(1480, "sine", 0.12, 0.09, 0.26);
+}
+
+function soundLost() {
+  if (!audioEnabled) return;
+  try {
+    const actx = getAudioContext();
+    if (!actx) return;
+    const osc = actx.createOscillator();
+    const gain = actx.createGain();
+    const t = actx.currentTime;
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(520, t);
+    osc.frequency.exponentialRampToValueAtTime(240, t + 0.22);
+    gain.gain.setValueAtTime(0.18, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    osc.connect(gain);
+    gain.connect(actx.destination);
+    osc.start(t);
+    osc.stop(t + 0.22);
+  } catch (e) {}
+}
+
+function soundEstop() {
+  playTone(360, "square", 0.06, 0, 0.2);
+  playTone(360, "square", 0.06, 0.08, 0.2);
+  playTone(360, "square", 0.12, 0.16, 0.22);
+}
+
+function soundLinkLost() {
+  playTone(440, "sine", 0.12, 0, 0.15);
+  playTone(330, "sine", 0.18, 0.14, 0.15);
+}
+
+// ------------------------------------------------------------ Flight Data Recorder (Blackbox)
+let mediaRecorder = null;
+let recordedChunks = [];
+let telemetryLog = [];
+let recStartTime = 0;
+let isRecording = false;
+
+function toggleRecord() {
+  if (isRecording) stopRecording();
+  else startRecording();
+}
+
+function startRecording() {
+  getAudioContext();
+  recordedChunks = [];
+  telemetryLog = [];
+  recStartTime = Date.now();
+
+  let stream = null;
+  try {
+    if (hud.captureStream) stream = hud.captureStream(25);
+  } catch (e) {}
+
+  if (stream && typeof MediaRecorder !== "undefined") {
+    let options = { mimeType: "video/webm;codecs=vp9" };
+    if (!MediaRecorder.isTypeSupported || !MediaRecorder.isTypeSupported(options.mimeType)) {
+      options = { mimeType: "video/webm" };
+      if (MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported(options.mimeType)) options = {};
+    }
+    try {
+      mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+      };
+      mediaRecorder.start(500);
+    } catch (e) {
+      console.warn("MediaRecorder start error:", e);
+      mediaRecorder = null;
+    }
+  }
+
+  isRecording = true;
+  $("btnRec").classList.add("rec-active");
+  $("btnRec").textContent = "■ REC 00:00";
+  playTone(880, "sine", 0.1, 0, 0.2);
+}
+
+function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+  $("btnRec").classList.remove("rec-active");
+  $("btnRec").innerHTML = `<span class="dot"></span> REC <kbd>O</kbd>`;
+  playTone(440, "sine", 0.15, 0, 0.2);
+
+  const dur = Math.round((Date.now() - recStartTime) / 1000);
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+
+  // 1. Download Video File
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.onstop = () => {
+      if (recordedChunks.length > 0) {
+        const blob = new Blob(recordedChunks, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `eksbot2_flight_${ts}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    };
+    try { mediaRecorder.stop(); } catch (e) {}
+  }
+
+  // 2. Download CSV Telemetry Blackbox
+  if (telemetryLog.length > 0) {
+    const headers = [
+      "Timestamp", "Elapsed_s", "Mode", "Phase", "Color", "Tracking",
+      "Target_X", "Target_Y", "Error_X", "Error_Y", "Target_Area",
+      "Linear_Speed", "Angular_Speed", "Speed_Scale", "Gripper", "Lift",
+      "FPS", "Link_OK", "Battery_V", "Battery_Pct"
+    ];
+    const csvContent = "data:text/csv;charset=utf-8," + 
+      headers.join(",") + "\n" + 
+      telemetryLog.map((row) => row.join(",")).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const a = document.createElement("a");
+    a.href = encodedUri;
+    a.download = `eksbot2_telemetry_${ts}.csv`;
+    a.click();
+  }
+}
+
+// ------------------------------------------------------------ Animasi Tombol
+function pulseButton(id) {
+  const el = $(id);
+  if (!el) return;
+  el.classList.remove("pulse");
+  void el.offsetWidth;
+  el.classList.add("pulse");
+}
+
+// ------------------------------------------------------------ Keyboard
+const MOVE = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+const held = new Set();
+const padHeld = new Set();
+let lastKeysSent = "";
+
+function sendKeys(force) {
+  const codes = [...new Set([...held, ...padHeld])];
+  const sig = codes.sort().join(",");
+  if (force || sig !== lastKeysSent || codes.length) { post("/api/keys", { codes }); lastKeysSent = sig; }
+  ["KeyW", "KeyA", "KeyS", "KeyD"].forEach((k) => {
+    const alt = { KeyW: "ArrowUp", KeyS: "ArrowDown", KeyA: "ArrowLeft", KeyD: "ArrowRight" }[k];
+    $("pad" + k.slice(3)).classList.toggle("held", codes.includes(k) || codes.includes(alt));
+  });
+}
+setInterval(() => { if (held.size || padHeld.size) sendKeys(); }, 150);
+
+function releaseAll() { held.clear(); padHeld.clear(); sendKeys(true); }
+window.addEventListener("blur", releaseAll);
+document.addEventListener("visibilitychange", () => { if (document.hidden) releaseAll(); });
+
+const ACTIONS = {
+  Space: () => { pulseButton("btnEstop"); soundEstop(); action("estop"); },
+  KeyM: () => { pulseButton("btnToggle"); action("toggle_mode"); },
+  Digit1: () => { pulseButton("btnRed"); action("color", "RED"); }, Numpad1: () => { pulseButton("btnRed"); action("color", "RED"); },
+  Digit2: () => { pulseButton("btnGreen"); action("color", "GREEN"); }, Numpad2: () => { pulseButton("btnGreen"); action("color", "GREEN"); },
+  Digit3: () => { pulseButton("btnBlue"); action("color", "BLUE"); }, Numpad3: () => { pulseButton("btnBlue"); action("color", "BLUE"); },
+  Digit4: () => { pulseButton("btnYellow"); action("color", "YELLOW"); }, Numpad4: () => { pulseButton("btnYellow"); action("color", "YELLOW"); },
+  KeyR: () => { pulseButton("btnCancel"); action("cancel_target"); },
+  KeyJ: () => { pulseButton("btnGripClose"); action("grip", "close"); }, KeyK: () => { pulseButton("btnGripOpen"); action("grip", "open"); },
+  KeyU: () => { pulseButton("btnLiftUp"); action("lift", "up"); }, KeyI: () => { pulseButton("btnLiftDown"); action("lift", "down"); },
+  Equal: () => { pulseButton("btnSpdUp"); action("speed", 1); }, NumpadAdd: () => { pulseButton("btnSpdUp"); action("speed", 1); },
+  Minus: () => { pulseButton("btnSpdDn"); action("speed", -1); }, NumpadSubtract: () => { pulseButton("btnSpdDn"); action("speed", -1); },
+  KeyC: () => { pulseButton("btnXhair"); action("crosshair_toggle"); },
+  KeyT: () => { pulseButton("btnTheme"); toggleTheme(); },
+  KeyH: () => { pulseButton("btnLegend"); toggleLegend(); },
+  KeyP: () => { pulseButton("btnAudio"); toggleAudio(); },
+  KeyO: () => { pulseButton("btnRec"); toggleRecord(); },
+  KeyF: () => (document.fullscreenElement ? document.exitFullscreen() : $("videoWrap").requestFullscreen()).catch(() => {}),
+  Escape: () => toggleLegend(false),
+};
+const NUDGE = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+document.addEventListener("keydown", (e) => {
+  const tag = (e.target.tagName || "").toLowerCase();
+  if ((tag === "input" || tag === "select") && e.code !== "Space" && e.code !== "Escape") return;
+  if (e.ctrlKey || e.metaKey) return;
+  if (e.shiftKey && NUDGE[e.code]) {
+    const s = e.altKey ? 5 : 1;
+    action("crosshair_nudge", [NUDGE[e.code][0] * s, NUDGE[e.code][1] * s]);
+    e.preventDefault(); return;
+  }
+  if (e.shiftKey && e.code === "KeyC") { if (!e.repeat) action("crosshair_reset"); e.preventDefault(); return; }
+  if (MOVE.has(e.code)) {
+    if (!held.has(e.code)) {
+      held.add(e.code); sendKeys();
+      const padKey = { KeyW: "padW", KeyA: "padA", KeyS: "padS", KeyD: "padD", ArrowUp: "padW", ArrowLeft: "padA", ArrowDown: "padS", ArrowRight: "padD" }[e.code];
+      if (padKey) pulseButton(padKey);
+    }
+    e.preventDefault(); return;
+  }
+  const fn = ACTIONS[e.code];
+  if (fn) { e.preventDefault(); if (!e.repeat || e.code === "Space") fn(); }
+});
+document.addEventListener("keyup", (e) => {
+  if (MOVE.has(e.code) && held.delete(e.code)) { sendKeys(true); e.preventDefault(); }
+});
+
+// ------------------------------------------------------------ Tombol layar
+document.querySelectorAll("[data-key]").forEach((b) => {
+  const k = b.dataset.key;
+  const down = (e) => { e.preventDefault(); b.setPointerCapture && b.setPointerCapture(e.pointerId); padHeld.add(k); sendKeys(); pulseButton(b.id); };
+  const up = () => { if (padHeld.delete(k)) sendKeys(true); };
+  b.addEventListener("pointerdown", down);
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((ev) => b.addEventListener(ev, up));
+});
+$("btnEstop").onclick = () => { pulseButton("btnEstop"); soundEstop(); action("estop"); };
+$("padStop").onclick = () => { pulseButton("padStop"); releaseAll(); soundEstop(); action("estop"); };
+$("btnManual").onclick = () => { pulseButton("btnManual"); action("mode", "MANUAL"); };
+$("btnAuto").onclick = () => { pulseButton("btnAuto"); action("mode", "AUTO"); };
+$("btnToggle").onclick = () => { pulseButton("btnToggle"); action("toggle_mode"); };
+document.querySelectorAll("[data-color]").forEach((b) => (b.onclick = () => { pulseButton(b.id); action("color", b.dataset.color); }));
+$("btnCancel").onclick = () => { pulseButton("btnCancel"); action("cancel_target"); };
+$("btnSpdUp").onclick = () => { pulseButton("btnSpdUp"); action("speed", 1); };
+$("btnSpdDn").onclick = () => { pulseButton("btnSpdDn"); action("speed", -1); };
+$("btnGripClose").onclick = () => { pulseButton("btnGripClose"); action("grip", "close"); };
+$("btnGripOpen").onclick = () => { pulseButton("btnGripOpen"); action("grip", "open"); };
+$("btnLiftUp").onclick = () => { pulseButton("btnLiftUp"); action("lift", "up"); };
+$("btnLiftDown").onclick = () => { pulseButton("btnLiftDown"); action("lift", "down"); };
+$("btnXhair").onclick = () => { pulseButton("btnXhair"); action("crosshair_toggle"); };
+$("btnXhairReset").onclick = () => { pulseButton("btnXhairReset"); action("crosshair_reset"); };
+$("btnTheme").onclick = () => { pulseButton("btnTheme"); toggleTheme(); };
+$("btnLegend").onclick = () => { pulseButton("btnLegend"); toggleLegend(true); };
+$("btnLegendClose").onclick = () => toggleLegend(false);
+$("legend").addEventListener("click", (e) => { if (e.target.id === "legend") toggleLegend(false); });
+$("btnAudio").onclick = () => { pulseButton("btnAudio"); toggleAudio(); };
+$("btnRec").onclick = () => { pulseButton("btnRec"); toggleRecord(); };
+document.querySelectorAll("button").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
+
+// ------------------------------------------------------------ Crosshair panel
+const XMAP = { xStyle: "style", xColor: "color", xSize: "size", xGap: "gap", xThick: "thickness", xDx: "dx", xDy: "dy" };
+const OUT = { xSize: "oSize", xGap: "oGap", xThick: "oThick", xDx: "oDx", xDy: "oDy" };
+Object.entries(XMAP).forEach(([id, key]) => {
+  $(id).addEventListener("input", () => {
+    const el = $(id), val = el.type === "range" ? parseInt(el.value, 10) : el.value;
+    if (OUT[id]) $(OUT[id]).textContent = val;
+    post("/api/crosshair", { [key]: val });
+  });
+});
+function syncCrosshairPanel(c) {
+  Object.entries(XMAP).forEach(([id, key]) => {
+    const el = $(id);
+    if (document.activeElement !== el && String(el.value) !== String(c[key])) el.value = c[key];
+    if (OUT[id]) $(OUT[id]).textContent = c[key];
+  });
+  $("btnXhair").classList.toggle("on", c.visible);
+}
+
+// ------------------------------------------------------------ HSV Tuner Panel
+const HSV_FIELDS = ["hMin", "hMax", "sMin", "sMax", "vMin", "vMax"];
+const HSV_OUTS = { hMin: "oHMin", hMax: "oHMax", sMin: "oSMin", sMax: "oSMax", vMin: "oVMin", vMax: "oVMax" };
+
+async function loadHsvData() {
+  try {
+    const res = await fetch("/api/hsv");
+    if (!res.ok) return;
+    const data = await res.json();
+    const curColor = $("hsvColor").value || data.active || "RED";
+    if (data.ranges && data.ranges[curColor]) {
+      const r = data.ranges[curColor];
+      $("hMin").value = r.h_min; $("hMax").value = r.h_max;
+      $("sMin").value = r.s_min; $("sMax").value = r.s_max;
+      $("vMin").value = r.v_min; $("vMax").value = r.v_max;
+      HSV_FIELDS.forEach((f) => { if (HSV_OUTS[f]) $(HSV_OUTS[f]).textContent = $(f).value; });
+    }
+  } catch (e) {}
+}
+
+function sendHsvUpdate() {
+  const body = {
+    color: $("hsvColor").value,
+    h_min: parseInt($("hMin").value, 10),
+    h_max: parseInt($("hMax").value, 10),
+    s_min: parseInt($("sMin").value, 10),
+    s_max: parseInt($("sMax").value, 10),
+    v_min: parseInt($("vMin").value, 10),
+    v_max: parseInt($("vMax").value, 10)
+  };
+  HSV_FIELDS.forEach((f) => { if (HSV_OUTS[f]) $(HSV_OUTS[f]).textContent = $(f).value; });
+  post("/api/hsv", body);
+}
+
+$("hsvColor").addEventListener("change", loadHsvData);
+HSV_FIELDS.forEach((f) => $(f).addEventListener("input", sendHsvUpdate));
+$("btnHsvReset").onclick = async () => {
+  pulseButton("btnHsvReset");
+  await post("/api/hsv", { reset: true });
+  loadHsvData();
+};
+loadHsvData();
+
+// ------------------------------------------------------------ Klik lock target
+function videoRect() {
+  const W = hud.clientWidth, H = hud.clientHeight;
+  const fw = (state && state.frame[0]) || video.naturalWidth || 320;
+  const fh = (state && state.frame[1]) || video.naturalHeight || 240;
+  const s = Math.min(W / fw, H / fh);
+  return { x: (W - fw * s) / 2, y: (H - fh * s) / 2, s, fw, fh };
+}
+hud.addEventListener("click", (e) => {
+  getAudioContext();
+  const r = videoRect(), b = hud.getBoundingClientRect();
+  const px = (e.clientX - b.left - r.x) / r.s, py = (e.clientY - b.top - r.y) / r.s;
+  if (px < 0 || py < 0 || px > r.fw || py > r.fh) return;
+  post("/api/lock", { x: px / r.fw, y: py / r.fh });
+});
+
+// ------------------------------------------------------------ Polling telemetri
+let inflight = false;
+let lastTrackingState = false;
+let lastLinkState = true;
+
+async function poll() {
+  if (inflight) return;
+  inflight = true;
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    state = await r.json(); serverOk = true; updatePanel();
+  } catch (e) { serverOk = false; updatePanel(); }
+  inflight = false;
+}
+setInterval(poll, 100);
+video.onerror = () => setTimeout(() => (video.src = "/stream.mjpg?" + Date.now()), 1000);
+
+function pill(id, text, cls) { const el = $(id); el.textContent = text; el.className = "pill" + (cls ? " " + cls : ""); }
+
+function updatePanel() {
+  if (!serverOk || !state) {
+    pill("pLink", "SERVER OFFLINE", "bad");
+    if (lastLinkState) { soundLinkLost(); lastLinkState = false; }
+    return;
+  }
+  const s = state;
+
+  // Sound cues on state transition
+  if (!lastTrackingState && s.tracking) soundLock();
+  else if (lastTrackingState && !s.tracking && s.mode === "AUTO") soundLost();
+  lastTrackingState = s.tracking;
+
+  if (lastLinkState && !s.link) soundLinkLost();
+  lastLinkState = s.link;
+
+  pill("pLink", s.link ? "LINK OK" : "NO SIGNAL", s.link ? "ok" : "bad");
+
+  // Telemetri Baterai
+  const bV = s.battery_v || 12.0, bPct = s.battery_pct !== undefined ? s.battery_pct : 95;
+  const bCls = bPct > 50 ? "ok" : bPct > 20 ? "warn" : "bad";
+  pill("pBatt", `BATT ${bV.toFixed(1)}V · ${bPct}%`, bCls);
+
+  pill("pMode", s.mode, s.mode === "AUTO" ? "warn" : "");
+  pill("pPhase", s.tracking ? s.phase + " · LOCK" : s.phase, s.tracking ? "ok" : "");
+  pill("pFps", s.fps.toFixed(1) + " FPS", s.fps < 8 ? "warn" : "");
+  $("pSrc").textContent = s.source;
+
+  $("btnManual").classList.toggle("on", s.mode === "MANUAL");
+  $("btnAuto").classList.toggle("on", s.mode === "AUTO");
+  document.querySelectorAll("[data-color]").forEach((b) => b.classList.toggle("on", b.dataset.color === s.color));
+  syncCrosshairPanel(s.crosshair);
+
+  $("telem").innerHTML = [
+    ["Baterai", `${bV.toFixed(1)}V (${bPct}%)`],
+    ["Lin (m/s)", s.lin.toFixed(2)], ["Ang (rad/s)", s.ang.toFixed(2)],
+    ["Speed", Math.round(s.speed_scale * 100) + "%"], ["Warna", s.color],
+    ["Gripper", s.grip + "° " + (s.grip > 45 ? "JEPIT" : "BUKA")], ["Lift", s.lift + "° " + (s.lift > 45 ? "NAIK" : "TURUN")],
+    ["Odom (X, Y)", `${(s.odom_x || 0).toFixed(2)}m, ${(s.odom_y || 0).toFixed(2)}m`],
+    ["Heading (θ)", `${(s.odom_deg || 0).toFixed(1)}°`],
+    ["Gerak Objek", s.obj_speed > 18 ? `${s.obj_speed.toFixed(0)} px/s [${s.obj_dir}]` : "DIAM"],
+    ["Err X", s.err_x + " px"], ["Norm X", s.norm_x.toFixed(2)],
+    ["Area", s.area], ["Kandidat", s.targets.length],
+    ["Aim", s.aim.join(", ")], ["Frame", s.frame.join("x")],
+    ["Blackbox", isRecording ? "REC ACTIVE" : "STANDBY"]
+  ].map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("");
+
+  // Record Telemetry Row to Blackbox Buffer
+  if (isRecording) {
+    const elapsed = ((Date.now() - recStartTime) / 1000).toFixed(2);
+    const secs = Math.floor(elapsed);
+    const m = String(Math.floor(secs / 60)).padStart(2, "0");
+    const sec = String(secs % 60).padStart(2, "0");
+    $("btnRec").innerHTML = `<span class="dot"></span> REC ${m}:${sec}`;
+
+    telemetryLog.push([
+      new Date().toISOString(), elapsed, s.mode, s.phase, s.color, s.tracking ? "YES" : "NO",
+      s.target_center ? s.target_center[0] : 0, s.target_center ? s.target_center[1] : 0,
+      s.err_x, s.err_y, s.area, s.lin, s.ang, s.speed_scale, s.grip, s.lift,
+      s.fps, s.link ? "1" : "0", bV, bPct
+    ]);
+  }
+}
+
+// ------------------------------------------------------------ HUD (canvas)
+const XCOL = { lime: "#7CFC00", red: "#ff4040", cyan: "#00e5ff", yellow: "#ffe600", white: "#ffffff", black: "#000000" };
+const TCOL = { RED: "#ff5a5a", GREEN: "#4cd964", BLUE: "#4aa8ff", YELLOW: "#ffd700" };
+
+function label(text, x, y, color, align) {
+  ctx.font = "600 12px ui-monospace, monospace";
+  const w = ctx.measureText(text).width + 10;
+  const lx = align === "right" ? x - w : align === "center" ? x - w / 2 : x;
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(lx, y, w, 18);
+  ctx.fillStyle = color || "#fff"; ctx.textBaseline = "middle"; ctx.fillText(text, lx + 5, y + 9);
+}
+function brackets(x, y, w, h, len, color, lw) {
+  ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath();
+  [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]].forEach(([cx, cy, sx, sy]) => {
+    ctx.moveTo(cx + sx * len, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + sy * len);
+  });
+  ctx.stroke();
+}
+function drawCrosshair(c, ax, ay, s) {
+  const col = XCOL[c.color] || "#7CFC00", size = c.size * s, gap = c.gap * s;
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = c.thickness;
+  ctx.beginPath();
+  if (c.style === "dot") { ctx.arc(ax, ay, Math.max(2, c.thickness * 1.5), 0, Math.PI * 2); ctx.fill(); return; }
+  if (c.style === "circle") {
+    ctx.arc(ax, ay, size, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ax, ay, Math.max(1.5, c.thickness), 0, Math.PI * 2); ctx.fill(); return;
+  }
+  const g = c.style === "gapcross" ? gap : 0;
+  ctx.moveTo(ax - size, ay); ctx.lineTo(ax - g, ay); ctx.moveTo(ax + g, ay); ctx.lineTo(ax + size, ay);
+  ctx.moveTo(ax, ay - size); ctx.lineTo(ax, ay - g); ctx.moveTo(ax, ay + g); ctx.lineTo(ax, ay + size);
+  ctx.stroke();
+}
+
+function drawHUD() {
+  const dpr = window.devicePixelRatio || 1, W = hud.clientWidth, H = hud.clientHeight;
+  if (hud.width !== Math.round(W * dpr) || hud.height !== Math.round(H * dpr)) { hud.width = Math.round(W * dpr); hud.height = Math.round(H * dpr); }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  const s = state;
+  if (!s) { requestAnimationFrame(drawHUD); return; }
+  const r = videoRect(), X = (v) => r.x + v * r.s, Y = (v) => r.y + v * r.s;
+  const tc = TCOL[s.color] || "#fff";
+  const ax = X(s.aim[0]), ay = Y(s.aim[1]);
+
+  // Kandidat warna (belum lock)
+  if (!s.tracking) s.targets.forEach((t) => {
+    const [x, y, w, h] = t.bbox;
+    ctx.strokeStyle = tc; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(X(x), Y(y), w * r.s, h * r.s); ctx.setLineDash([]);
+    label("#" + t.id, X(x), Y(y) - 19, tc);
+  });
+
+  // Target terkunci (Kamikaze Lock Brackets & Velocity Vector)
+  if (s.tracking && s.bbox) {
+    const [x, y, w, h] = s.bbox, tx = X(s.target_center[0]), ty = Y(s.target_center[1]);
+    brackets(X(x), Y(y), w * r.s, h * r.s, Math.min(18, w * r.s / 3), "#ff3b3b", 3);
+    ctx.strokeStyle = "rgba(255,59,59,0.85)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(tx, ty); ctx.stroke();
+    ctx.fillStyle = "#ff3b3b"; ctx.beginPath(); ctx.arc(tx, ty, 4, 0, Math.PI * 2); ctx.fill();
+
+    // Vektor prediksi gerak objek (garis kuning terputus jika objek bergerak)
+    if (s.obj_speed > 18 && s.pred_target) {
+      const px = X(s.pred_target[0]), py = Y(s.pred_target[1]);
+      ctx.strokeStyle = "#ffcc00"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(px, py); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#ffcc00"; ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
+    }
+
+    const spdText = s.obj_speed > 18 ? ` ${s.obj_speed.toFixed(0)}px/s [${s.obj_dir}]` : "";
+    label("LOCK " + s.color + spdText, X(x), Y(y) - 19, "#ff6b6b");
+  }
+
+  if (s.crosshair.visible) drawCrosshair(s.crosshair, ax, ay, r.s);
+
+  // Bar error heading (atas tengah)
+  const bw = Math.min(260, W * 0.4), bx = W / 2 - bw / 2, by = 30;
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(bx, by, bw, 10);
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(W / 2 - 1, by - 3, 2, 16);
+  if (s.tracking) { ctx.fillStyle = Math.abs(s.norm_x) < 0.08 ? "#4cd964" : "#ffcc00"; ctx.fillRect(W / 2 + s.norm_x * bw / 2 - 4, by - 2, 8, 14); }
+
+  // Status Recorder (Blinking REC di HUD)
+  if (isRecording) {
+    const elapsed = Math.floor((Date.now() - recStartTime) / 1000);
+    const m = String(Math.floor(elapsed / 60)).padStart(2, "0");
+    const sec = String(elapsed % 60).padStart(2, "0");
+    const blink = Math.floor(Date.now() / 500) % 2 === 0;
+    label((blink ? "● " : "  ") + `REC ${m}:${sec}`, W / 2, 10, "#ff4040", "center");
+  }
+
+  // Info kiri atas
+  label(s.mode + " · " + s.phase, 10, 10, s.mode === "AUTO" ? "#ffcc00" : "#9fd3ff");
+  label("TARGET " + s.color + (s.tracking ? " · LOCK" : " · " + s.targets.length + " kandidat"), 10, 32, tc);
+
+  // Info kanan atas (FPS, Baterai, Link)
+  label(s.fps.toFixed(1) + " FPS", W - 10, 10, s.fps < 8 ? "#ffcc00" : "#fff", "right");
+  const bV = s.battery_v || 12.0, bPct = s.battery_pct !== undefined ? s.battery_pct : 95;
+  const bCol = bPct > 50 ? "#4cd964" : bPct > 20 ? "#ffcc00" : "#ff4040";
+  label(`BATT ${bV.toFixed(1)}V (${bPct}%)`, W - 10, 32, bCol, "right");
+  label(s.link ? "LINK OK" : "NO SIGNAL", W - 10, 54, s.link ? "#4cd964" : "#ff5a5a", "right");
+
+  // Info kiri bawah
+  label("LIN " + s.lin.toFixed(2) + "  ANG " + s.ang.toFixed(2) + "  SPD " + Math.round(s.speed_scale * 100) + "%", 10, H - 50, "#fff");
+  label("GRIP " + (s.grip > 45 ? "JEPIT" : "BUKA") + "  LIFT " + (s.lift > 45 ? "NAIK" : "TURUN") + "  ERR " + s.err_x, 10, H - 28, "#fff");
+  label("H = legenda", W - 10, H - 28, "#bbb", "right");
+
+  // Event singkat
+  s.events.slice(-3).forEach((ev, i) => label(ev.text, W / 2, H * 0.62 + i * 22, ev.text.includes("STOP") || ev.text.includes("LOST") ? "#ff6b6b" : "#ffe08a", "center"));
+
+  if (!s.link || !serverOk) {
+    ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(0, H / 2 - 24, W, 48);
+    ctx.fillStyle = "#ff6b6b"; ctx.font = "700 22px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(serverOk ? "NO SIGNAL - menunggu kamera, robot dihentikan" : "SERVER OFFLINE - jalankan main.py", W / 2, H / 2);
+    ctx.textAlign = "left";
+  }
+  requestAnimationFrame(drawHUD);
+}
+requestAnimationFrame(drawHUD);
+</script>
+</body>
+</html>

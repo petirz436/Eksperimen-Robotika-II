@@ -1,7 +1,9 @@
 <launch>
-  <!-- Launch ROS Modular Control Main Node -->
-  <node name="eksbot2_modular_main" pkg="eksbot_simulation" type="main.py" output="screen">
-    <param name="use_sim" value="true" />
-    <param name="image_topic" value="/camera/image_raw" />
+  <!-- Launch ROS Modular Control Main Node (SIMULASI GAZEBO).
+       Robot fisik TIDAK memakai launch ini: jalankan `python3 main.py` (tanpa ROS). -->
+  <arg name="port" default="8000" />
+  <arg name="image_topic" default="/camera/image_raw" />
+  <node name="eksbot2_modular_main" pkg="eksbot_simulation" type="main.py" output="screen"
+        args="--source sim --image-topic $(arg image_topic) --port $(arg port)">
   </node>
 </launch>

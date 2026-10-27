@@ -5,7 +5,7 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
 ---
 
 ## 📌 Status Terakhir Proyek
-- **Tanggal Update Terakhir**: 2026-09-18
+- **Tanggal Update Terakhir**: 2026-10-23
 - **Status Workspace**: ROS Noetic Package `eksbot_simulation` Terkompilasi 100% (`catkin_make` Sukses).
 - **Status Fitur Utama**:
   - [x] Arena Simulasi Gazebo AutoStack ($3.5\times 2.8\text{ m}$) (`autostack_arena.world`).
@@ -15,6 +15,11 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
   - [x] Template Firmware ESP32 (`esp32_firmware_example.ino`) via `rosserial`.
   - [x] Script Perbaikan Jaringan ROS (`setup_env.sh`) untuk mengatasi `RLException: Unable to contact my own server`.
   - [x] Dokumentasi Utama (`README.md`) & `PROGRESS_REPORT.md`.
+  - [x] Workspace dipulihkan ke checkpoint `eksbot_baru` (perubahan Codex 2026-10-21 dihapus).
+  - [x] Firmware `firmware_esp32_cam.ino` diperbaiki berdasarkan `tes_cam_lcd/tescamesp.cpp` (kompilasi `esp32:esp32:esp32wrover` sukses; uji hardware masih perlu dilakukan).
+  - [x] `main.py`: `ESPCamReader` latest-frame + auto-reconnect, loop tidak freeze saat stream mati.
+  - [x] Arsitektur modular terpisah: `camera_sources.py` (sumber kamera), `control.py` (kontroler independen GUI), `hmi_server.py` (web server HTTP natif), `hmi/index.html` (Console HMI Pilot HUD flat theme + crosshair adjustment).
+  - [x] Firmware `firmware_esp32_control.ino` dilengkapi failsafe 500 ms dan non-blocking Serial parser. Keduanya lulus uji kompilasi arduino-cli dan unit test integrasi 22/22 PASS.
 
 ---
 
@@ -193,6 +198,102 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
 - **User Prompt**: berikajn sintax terminall step by step update gothub
 - **Tindakan & Progress**: Menyediakan panduan langkah demi langkah perintah terminal Git (`git add .`, `git commit`, `git push origin main`) untuk mengunggah semua perubahan workspace ke GitHub (`petirz436/Eksperimen-Robotika-II`).
 
+### Prompt 25: Pemulihan dari Perubahan Codex, Audit AI, & Perbaikan Firmware ESP32-CAM (connect/delay/freeze)
+- **User Prompt**: Kode dirusak Codex, kembalikan berdasarkan checkpoint di `eksbot_baru`, bandingkan, baca semua README, kembalikan yang dari Antigravity dan hapus yang dari Codex. Jelaskan kenapa `tescamesp.cpp` bisa connect sedangkan `firmware_esp32_cam.ino` tidak, dan kenapa setelah "diperbaiki Codex" malah delay/freeze padahal folder lama lancar. Berikan penjelasan & perbaikan.
+- **Tindakan & Progress**:
+  1. **Audit sumber perubahan** (`eksbot_baru/Eksperimen-Robotika-II` = clone GitHub `69e92f9`; dibandingkan dengan `eksbot2`, mtime file, log sesi Antigravity di `~/.gemini/.../brain`, dan README/PROGRESS_REPORT). Perubahan Codex semuanya bertanggal 2026-10-21 10:57-11:23 dan memuat "Prompt 25-31" di PROGRESS_REPORT: `firmware_esp32_cam.ino`, `firmware_esp32_control.ino`, `main.py`, `vision.py`, `README.md`, `PROGRESS_REPORT.md` (+ `.pyc`). Semuanya dikembalikan ke checkpoint (`git checkout`); salinan versi Codex disimpan di folder scratch sesi ini untuk jaga-jaga.
+  2. **Dipertahankan (bukan dari Codex, mtime 2026-10-02 s/d 10-14, dari Antigravity/user)**: `visionTarget.py` (`USE_ESP_CAM = True`), `dummy_robot.urdf.xacro` (`wheelSeparation 0.26`), `esp32_firmware_example.ino` (komentar dihapus), `tes_cam_lcd/test_vision.py` (pengganti `test_vision_laptop.py`, dibuat sesi 2026-10-06), `tes_manual_control/main.py` & `robot.ino` (pengganti `test_manual_keyboard.py` & `firmware_esp32_control_direct_wifi.ino`), `uts by fathir.zip`.
+  3. **Fitur Codex yang sengaja DIHAPUS**: dashboard web laptop, ESP-NOW, tombol Batalkan Target, resolusi VGA, failsafe di firmware kontrol, ubahan 180° di sensor, perubahan README/PROGRESS Prompt 25-31 versi Codex.
+  4. **Penyebab firmware lama (checkpoint) tidak bisa connect** (dibandingkan dengan `tescamesp.cpp` yang berjalan di board WROVER yang sama):
+     - Pin kamera memakai peta **AI-Thinker**, bukan **WROVER Kit** -> `esp_camera_init` gagal -> `return` di `setup()` **sebelum** `WiFi.softAP()` -> Wi-Fi tidak pernah menyala.
+     - `Serial2` di GPIO16/17 = pin **PSRAM** pada WROVER -> crash/reboot saat PSRAM dipakai (VGA, `fb_count=2`).
+     - XCLK 20 MHz (tescamesp 10 MHz), VGA q12, tanpa `CAMERA_GRAB_LATEST` -> frame basi/antrean.
+     - Stream mengirim data tanpa boundary pembuka, dan `ArduinoJson` wajib terpasang.
+  5. **Penyebab delay/freeze setelah versi Codex** (analisis kode; belum diukur di hardware): VGA 640x480 lewat SoftAP + XCLK 10 MHz terlalu berat (frame ~4x lebih besar dari QVGA); 1 task HTTP melayani stream sehingga reconnect saat koneksi lama belum bersih memblokir klien baru; ESPCamReader membaca frame TERTUA (antrean) dan bila error `read()` mati selamanya; loop `main.py` tidak memanggil `waitKey` saat tak ada frame sehingga jendela "hang"; dashboard + CSRT + HSV + re-encode MJPEG pada satu loop menambah latensi.
+  6. **Perbaikan `firmware_esp32_cam.ino`**: konfigurasi kamera disalin dari `tescamesp.cpp` (WROVER Kit, XCLK 10 MHz, QVGA, `jpeg_quality 10`, `fb_count 2`, `CAMERA_GRAB_LATEST`); AP tetap menyala walau kamera gagal dan kamera dicoba ulang tiap 5 detik; UART ke kontrol dipindah ke GPIO33(TX)/GPIO32(RX) (WROVER) agar tidak bentrok PSRAM; stream: boundary+header 1 chunk, `lru_purge_enable`, `max_open_sockets=4`, timeout 3 dtk, `WiFi.setSleep(false)`; hilangkan ArduinoJson (parser angka native); kuras semua paket UDP dan pakai perintah terbaru; failsafe STOP 500 ms; debug print dibatasi. Stream tetap di `http://192.168.4.1/stream` (port 80) agar kompatibel dengan `main.py`.
+  7. **Perbaikan `main.py`**: `ESPCamReader` memakai thread yang hanya menyimpan frame terbaru + reconnect otomatis; loop tetap memanggil `waitKey` (ESC berfungsi) dan menghentikan robot jika tak ada frame > 1 dtk.
+  8. **Validasi**: firmware dikompilasi dengan `arduino-cli` (`esp32:esp32:esp32wrover`, core 3.3.11) sukses; `ESPCamReader` diuji dengan server MJPEG tiruan (tidak ada backlog frame, reconnect otomatis setelah stream putus). Uji kamera/robot fisik belum dilakukan.
+  9. **Aksi untuk user**: ubah wiring UART kamera ke GPIO33/32 (lihat README), pastikan hanya satu ESP yang memancarkan `dimas_asoy_geboy`, tutup tab browser stream sebelum menjalankan `main.py`, dan catat bahwa daya UBEC (Prompt 19-23) dapat membuat Wi-Fi hilang/reboot.
+
+### Prompt 26: Modularisasi Sistem, Web HMI Pilot Console, HUD Canvas & Custom Crosshair, SOP Implementasi Robot Fisik
+- **User Prompt**: Implementasi robot fisik (apa yang diupload, SOP run, konektivitas 2 ESP + 3 script, apakah butuh ROS di fisik, status modularitas), penyesuaian visionTarget/kamikaze CSRT + filter warna, keyboard mapping, pembuatan HMI website lokal di laptop (stream MJPEG, HUD flat tanpa gradasi tema terang/gelap, tombol soft, legenda tombol, crosshair adjustable), serta rekomendasi fitur developer/pilot.
+- **Tindakan & Progress**:
+  1. **Modularisasi Kode**:
+     - `camera_sources.py`: Memisahkan antarmuka sumber kamera (`ESPCamReader` via background thread latest-frame, `ROSImageSub` untuk Gazebo, `WebcamSource` untuk laptop webcam).
+     - `control.py`: Mengisolasi state machine kendali (`MANUAL` / `AUTO` navigasi berfase `ALIGNING` -> `DRIVING` -> `PICKUP`), pemetaan keyboard, kalkulasi kinematics differential drive, dan manajemen crosshair offset.
+     - `hmi_server.py`: Server web HTTP multi-threaded murni standar Python (tanpa Flask) dengan endpoint MJPEG single-encode broadcast (`/stream.mjpg`), API telemetri JSON (`/api/state`), input event (`/api/action`, `/api/keys`, `/api/lock`, `/api/crosshair`).
+     - `hmi/index.html`: Web Interface pilot flat modern, mendukung tema terang (putih) & gelap (hitam) tanpa gradasi, warna tombol soft, legenda tombol popup (`H`), overlay HUD Canvas dinamis (braket target, error bar heading, status banner), serta interactive target lock via click.
+     - `main.py`: Orkestrator ramping dengan flag `--source esp|sim|webcam`, opsi `--gui` (OpenCV window) dan `--no-browser`.
+  2. **Firmware ESP32 Control**:
+     - Memperbarui `firmware_esp32_control.ino` dengan parsing non-blocking ring buffer dan timer watchdog failsafe 500 ms (motor otomatis berhenti jika koneksi putus).
+  3. **Verifikasi & Validasi**:
+     - Kompilasi `arduino-cli`: `firmware_esp32_cam.ino` (ESP32 Wrover Module) & `firmware_esp32_control.ino` (ESP32 Dev Module) 100% SUKSES.
+     - Uji integrasi otomatis `test_integration.py` menggunakan mock ESP32-CAM stream & UDP server: 22/22 skenario pengujian PASS (stream link, keyboard WSAD, smooth arc turns, lock target click, CSRT tracking, manual override, color switch, crosshair offset adjustment, E-STOP, failsafe timeout, auto-reconnect).
+
+### Prompt 27: Implementasi Fitur Lanjutan Pilot & Developer (Animasi Tombol, Web Audio Cues, Blackbox Recorder, HSV Tuner, Telemetri Baterai, & OTA Update)
+- **User Prompt**: Implementasikan fitur lanjutan: animasi tombol WSAD & tombol mapping saat ditekan; Audio Feedback / Sound Cues sintesis Web Audio API (radar lock, link drop, E-STOP); Flight Data Recorder (Blackbox telemetry video WebM + CSV); HSV Color Picker / Tuner Slider real-time di web; Real-time Battery Voltage Telemetry (ADC GPIO34); dan OTA Firmware Update Web Page di ESP32-CAM via Wi-Fi.
+- **Tindakan & Progress**:
+  1. **Animasi & Visual Feedback Tombol**:
+     - Ditambahkan keyframe animation `@keyframes keyPulse` (`.pulse`) dan status `.held` halus pada tombol kemudi dan seluruh tombol aksi (`btnEstop`, `btnToggle`, `btnRed`, `btnGreen`, `btnBlue`, `btnYellow`, `btnCancel`, `btnGripClose`, `btnGripOpen`, `btnLiftUp`, `btnLiftDown`, `btnSpdUp`, `btnSpdDn`, `btnXhair`, `btnTheme`, `btnLegend`, `btnAudio`, `btnRec`).
+     - Tekanan fisik pada keyboard langsung memicu animasi tombol UI yang bersesuaian di layar console.
+  2. **Web Audio API Sound Cues (100% Offline Sintesis)**:
+     - Menggunakan `AudioContext` sintesis browser (tanpa aset file audio eksternal):
+       - *Target Lock*: Dual sharp rising frequency chirps (980 Hz -> 1480 Hz) ala radar jet tempur.
+       - *Target Lost*: Descending tone (520 Hz -> 240 Hz).
+       - *E-STOP Alarm*: Triple urgent buzzer (360 Hz).
+       - *Link Lost Chime*: Dual warning tone (440 Hz -> 330 Hz).
+     - Dilengkapi tombol toggle `🔊 Audio [P]` dengan penyimpanan preferensi di `localStorage`.
+  3. **Flight Data Recorder (Blackbox Telemetry)**:
+     - Tombol `● REC [O]` di header dan aside.
+     - Merekam canvas stream HUD ke video `video/webm` menggunakan `MediaRecorder`.
+     - Menyimpan log koordinat dan status robot tiap 100 ms ke buffer CSV (Timestamp, Elapsed, Mode, Phase, Color, Tracking, Target X/Y, Error X/Y, Area, Lin, Ang, Speed Scale, Gripper, Lift, FPS, Link, Battery V, Battery Pct).
+     - Menghentikan rekaman otomatis mendownload dua file langsung: `eksbot2_flight_<timestamp>.webm` dan `eksbot2_telemetry_<timestamp>.csv`.
+     - Tampil indikator kedip `● REC mm:ss` di HUD canvas dan header.
+  4. **HSV Color Tuner Slider Real-Time**:
+     - Ditambahkan preset `YELLOW` (H: 20-35, S: 70-255, V: 70-255) di `vision.py`.
+     - Ditambahkan method `get_hsv_ranges()`, `set_hsv_range()`, dan `reset_hsv_presets()` pada `VisionEngine`.
+     - Ditambahkan endpoint `GET /api/hsv` dan `POST /api/hsv` di `hmi_server.py`.
+     - Panel UI di web dengan 6 slider (`H Min`, `H Max`, `S Min`, `S Max`, `V Min`, `V Max`) dan tombol Reset. Pengaturan slider langsung meng-update deteksi citra OpenCV secara live tanpa perlu me-restart script Python.
+  5. **Real-Time Battery Voltage Telemetry**:
+     - `firmware_esp32_control.ino`: Membaca analog ADC `GPIO34` (divider 4:1 untuk LiPo 3S 11.1V-12.6V atau 2S) dan mengirimkan `BATT:xx.xx\n` ke Serial2 ke ESP32-CAM.
+     - `firmware_esp32_cam.ino`: Menerima pembacaan `BATT:` dan merespons via UDP status `{"batt": 12.0, "pct": 95}` ke laptop.
+     - `robot_api.py` & `control.py`: Menerima dan memasukkan data `battery_v` & `battery_pct` ke telemetri JSON.
+     - `index.html`: Header pill status baterai berwarna dinamis (hijau/kuning/merah) dan indikator grafis baterai di Canvas HUD.
+  6. **OTA (Over-The-Air) Firmware Update Web Page di ESP32-CAM**:
+     - Ditambahkan library `<Update.h>` pada `firmware_esp32_cam.ino`.
+     - Ditambahkan HTTP handler `GET /update` (halaman upload biner) dan `POST /update` (flashing firmware nirkabel) pada port 80 ESP32-CAM.
+     - Developer cukup membuka `http://192.168.4.1/update` dari browser untuk upload firmware `.bin` tanpa kabel USB.
+  7. **Validasi Kompilasi & Pengujian**:
+     - Kedua firmware ESP32 berhasil dikompilasi 100% menggunakan `arduino-cli` (CAM: 79%, Control: 23%).
+     - Unit test integrasi modular 22/22 PASS, pengujian endpoint `/api/hsv` dan telemetri baterai PASS.
+
+### Prompt 28: Konsolidasi Arsitektur Bersih (Clean Robotics Architecture 3-File + HMI Sub-Paket)
+- **User Prompt**: Eksekusi perapihan arsitektur modular. `camera_sources` digabung ke `vision.py`, kontrol digabung ke `robot_api.py`, HMI diintegrasikan ke sub-paket `hmi/`, dan firmware dipindah ke folder `firmware/`.
+- **Tindakan & Progress**:
+  1. **Konsolidasi Vision (`vision.py`)**:
+     - Memindahkan kelas sumber kamera (`ROSImageSub`, `WebcamSource`, `ESPCamReader`, `open_source`, `HAS_ROS`) ke dalam `vision.py`.
+     - `camera_sources.py` lama dihapus.
+  2. **Konsolidasi Robot & Kontrol (`robot_api.py`)**:
+     - Menggabungkan low-level driver `RobotAPI` (ROS velocity publisher, socket UDP, servo gripper/lift, telemetri baterai) dan high-level controller `Controller` (state machine, WSAD mapping, autopilot pickup, crosshair persistence, telemetry dict) ke dalam `robot_api.py`.
+     - `control.py` lama dihapus.
+  3. **Isolasi Sub-Paket HMI (`hmi/`)**:
+     - Memindahkan `hmi_server.py` menjadi `hmi/server.py` dan menambahkan `hmi/__init__.py`.
+     - Folder `hmi/` kini mandiri menaungi `server.py` (backend HTTP/streamer) dan `index.html` (frontend console).
+     - `hmi_server.py` lama di root scripts dihapus.
+  4. **Pemisahan Firmware Arduino (`firmware/`)**:
+     - Memindahkan sketch Arduino ke `catkin_ws/src/eksbot_simulation/firmware/` dengan folder yang sesuai standar Arduino IDE:
+       - `firmware/firmware_esp32_cam/firmware_esp32_cam.ino`
+       - `firmware/firmware_esp32_control/firmware_esp32_control.ino`
+     - Folder `scripts/` kini murni hanya berisi file eksekusi Python.
+  5. **Pembaruan `main.py`**:
+     - Diperbarui dengan import bersih:
+       `from vision import open_source, HAS_ROS, VisionEngine`
+       `from robot_api import RobotAPI, Controller`
+       `from hmi import HMIServer`
+  6. **Validasi**:
+     - `test_integration.py`: 22/22 skenario integrasi PASS.
+     - Kompilasi `arduino-cli` dari folder `firmware/` baru: 100% SUKSES (CAM 79%, Control 23%).
+
 ---
 
 ## 🗺️ Peta File Utama Dalam Workspace
@@ -207,9 +308,12 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
 │       └── eksbot_simulation/
 │           ├── launch/
 │           │   ├── arena_simulation.launch   # Launch Gazebo world + robot + kubus
-│           │   └── vision_control.launch     # Launch ROS Vision Node
-│           ├── worlds/
-│           │   └── autostack_arena.world     # Dunia simulasi Gazebo AutoStack
+│           │   └── modular_control.launch    # Launch Aplikasi Modular Utama (main.py)
+│           ├── firmware/                     # Firmware Mikrokontroler Arduino ESP32
+│           │   ├── firmware_esp32_cam/       # Firmware ESP32-CAM (SoftAP + MJPEG Stream + OTA Web)
+│           │   │   └── firmware_esp32_cam.ino
+│           │   └── firmware_esp32_control/   # Firmware ESP32 Motor & Servo (UART + ADC Baterai)
+│           │       └── firmware_esp32_control.ino
 │           ├── models/
 │           │   ├── arena_ground/             # Tekstur & model spanduk 3.5m x 2.8m
 │           │   ├── cube_red/                 # SDF Kubus Merah 50mm 30g
@@ -217,10 +321,15 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
 │           │   └── cube_blue/                # SDF Kubus Biru 50mm 30g
 │           ├── urdf/
 │           │   └── dummy_robot.urdf.xacro    # URDF Robot Dummy + Gripper + Camera
-│           └── scripts/
-│               ├── visionTarget.py           # Vision Node ROS OpenCV CSRT
-│               ├── generate_arena_texture.py # PNG Renderer arena_banner.png
-│               └── esp32_firmware_example.ino # Firmware Arduino/ESP32
+│           └── scripts/                      # Core Python Runtime di Laptop
+│               ├── main.py                   # 1. ORKESTRATOR (CLI entry point & window loop)
+│               ├── vision.py                 # 2. MATA (Input Kamera ESP/ROS/Webcam + HSV + CSRT)
+│               ├── robot_api.py              # 3. TUBUH & OTAK (Hardware Driver UDP/ROS + Autopilot State Machine)
+│               ├── hmi/                      # 4. ANTARMUKA PILOT
+│               │   ├── server.py             # Server HTTP lokal, MJPEG Streamer, REST API
+│               │   └── index.html            # Web Console HUD Flat Theme + Canvas Overlay
+│               ├── visionTarget.py           # Legacy Vision Node
+│               └── esp32_firmware_example.ino# Legacy rosserial firmware
 ```
 
 ---

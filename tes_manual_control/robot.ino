@@ -1,34 +1,21 @@
-/*
- * ESP32 Control System Firmware - Direct Wi-Fi Test (Tanpa Kamera)
- * =================================================================
- * Fitur:
- * 1. ESP32 Sistem Kontrol memancarkan Wi-Fi Access Point (SoftAP):
- *    - SSID: "dimas_asoy_geboy" (atau "AutoStack-Control-Test")
- *    - Pass: "12345678"
- *    - IP Default: 192.168.4.1
- * 2. UDP Server pada Port 8888 mendengarkan JSON paket dari Laptop.
- * 3. Mengendalikan Motor DC (L298N/BTS7960) & Servo Gripper/Lift secara langsung.
- */
-
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <ArduinoJson.h>
 #include <ESP32Servo.h>
 
-// PIN CONFIGURATION MOTOR DRIVER (L298N / BTS7960)
-#define ENA_PIN 4  // PWM Speed Left
-#define IN1_PIN 16  // Direction 1 Left
-#define IN2_PIN 17  // Direction 2 Left
+//PIN MOTOR DRIVER
+#define ENA_PIN 4
+#define IN1_PIN 16
+#define IN2_PIN 17
+#define ENB_PIN 19
+#define IN3_PIN 21
+#define IN4_PIN 18
 
-#define ENB_PIN 19  // PWM Speed Right
-#define IN3_PIN 21  // Direction 1 Right
-#define IN4_PIN 18  // Direction 2 Right
-
-// PIN SERVO
+//PIN SERVO
 #define SERVO_GRIPPER_PIN 7
 #define SERVO_LIFT_PIN    3
 
-// CONFIG WI-FI SOFTAP & UDP
+//WIFI
 const char* AP_SSID = "dimas_asoy_geboy";
 const char* AP_PASS = "12345678";
 const int UDP_PORT  = 8888;

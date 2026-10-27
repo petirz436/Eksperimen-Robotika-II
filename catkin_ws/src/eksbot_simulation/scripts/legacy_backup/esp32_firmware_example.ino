@@ -12,7 +12,6 @@
  */
 
 
- //buatkan separate program untuk eksbot2 lalu buatkan fitur agar vision dapat deteksi R G dan B untuk yg deteksi coklat apus aja soalnya itu uji coba. lalu berikan tombol untuk switch mode warna
 #include <WiFi.h>
 #include <ros.h>
 #include <geometry_msgs/Twist.h>

@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""
-Test Manual Control Robot via Direct Wi-Fi UDP (Tanpa Kamera)
-==============================================================
-Script ini dijalankan di laptop untuk menguji pergerakan robot (WSAD + Servo)
-langsung terhubung ke Wi-Fi Access Point ESP32 Sistem Kontrol.
-
-Petunjuk Keyboard:
-  W / S    : Maju / Mundur
-  A / D    : Belok Kiri / Belok Kanan
-  SPACE    : Stop (Rem Darurat)
-  J / K    : Jepit (Gripper Close 90°) / Buka (Gripper Open 0°)
-  U / I    : Angkat Lift (Lift UP 90°) / Turunkan Lift (Lift DOWN 0°)
-  ESC      : Keluar dari Program
-"""
-
 import socket
 import json
 import time
@@ -43,16 +28,11 @@ def main():
 
     last_key_time = 0.0
 
-    print("==================================================")
-    print("   TEST DIRECT WI-FI MANUAL CONTROL (NO CAMERA)   ")
-    print("==================================================")
     print(f"Target ESP32 IP: {ESP_IP}:{ESP_PORT}")
     print("\n[PETUNJUK KONTROL]")
     print(" W / S    : Maju / Mundur")
     print(" A / D    : Belok Kiri / Kanan")
     print(" SPACE    : Stop")
-    print(" J / K    : Grip CLOSE / OPEN")
-    print(" U / I    : Lift UP / DOWN")
     print(" ESC      : Keluar\n")
 
     # Buat GUI Window Sederhana untuk Menangkap Keyboard
@@ -64,8 +44,6 @@ def main():
             canvas.fill(25)  # Background Gelap Modern
 
             # Header Text
-            cv.putText(canvas, "ROBOT MANUAL CONTROL TEST (NO CAM)", (30, 45),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
             cv.putText(canvas, f"Connected IP: {ESP_IP}:{ESP_PORT}", (30, 75),
                        cv.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
@@ -74,14 +52,6 @@ def main():
                        cv.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0) if curr_lin != 0 else (255, 255, 255), 2)
             cv.putText(canvas, f"Angular Velocity : {curr_ang:+.2f} rad/s", (30, 170),
                        cv.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0) if curr_ang != 0 else (255, 255, 255), 2)
-            cv.putText(canvas, f"Gripper Status   : {'CLOSED (90 deg)' if curr_grip > 45 else 'OPEN (0 deg)'}", (30, 210),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
-            cv.putText(canvas, f"Lift Status      : {'UP (90 deg)' if curr_lift > 45 else 'DOWN (0 deg)'}", (30, 250),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
-
-            # Info Key Controls
-            cv.putText(canvas, "Tekan WSAD, J/K, U/I di jendela ini | ESC untuk keluar", (30, 310),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.45, (150, 150, 150), 1)
 
             cv.imshow("Robot Control Test Panel", canvas)
 
