@@ -8,7 +8,7 @@ Komponen:
   - RobotAPI   : Antarmuka pengiriman instruksi gerak kecepatan (linear/angular) dan posisi servo
                  (gripper/lift) ke ROS Topic (/cmd_vel) atau langsung via Wi-Fi UDP ke ESP32 fisik.
                  Juga menangani pembacaan telemetri baterai ADC non-blocking dari ESP32.
-  - Controller : Otak navigasi & autopilot (MANUAL/AUTO, ALIGNING -> DRIVING -> PICKUP),
+  - Controller : Otak navigasi & autopilot (MANUAL/AUTO, FOLLOWING -> INTAKE -> PICKUP),
                  pemetaan kontrol keyboard (WSAD, E-STOP), manajemen crosshair dan titik bidik,
                  serta kompilasi data telemetri lengkap untuk HUD antarmuka pilot.
 """
@@ -38,14 +38,14 @@ except ImportError:
 MOVE_KEYS = {
     "KeyW": "fwd", "ArrowUp": "fwd",
     "KeyS": "back", "ArrowDown": "back",
-    "KeyA": "left", "ArrowLeft": "left",
-    "KeyD": "right", "ArrowRight": "right",
+    "KeyA": "right", "ArrowLeft": "right",  # Remap: Kiri (A) dibalik ke right agar motor fisik berbelok ke kiri
+    "KeyD": "left", "ArrowRight": "left",   # Remap: Kanan (D) dibalik ke left agar motor fisik berbelok ke kanan
 }
 
 KEY_TIMEOUT = 0.8         # detik: tombol "ditahan" dianggap lepas jika heartbeat berhenti
-MAX_LINEAR = 0.50         # m/s, sama dengan MAX_SPEED di firmware kontrol
-BASE_LINEAR = 0.30
-BASE_ANGULAR = 1.2
+MAX_LINEAR = 0.60         # m/s, sama dengan MAX_SPEED di firmware kontrol
+BASE_LINEAR = 0.40        # m/s kecepatan maju mundur dasar (ditingkatkan dari 0.30)
+BASE_ANGULAR = 0.80        # rad/s kecepatan belok dasar (ditingkatkan dari 1.2 agar bertenaga saat spot-turn)
 REF_AREA = 320 * 240      # resolusi acuan ambang area (QVGA)
 GRIP_AREA_REF = 12000     # luas bbox (QVGA) saat target dianggap sudah dalam jangkauan gripper
 
@@ -80,7 +80,7 @@ def _clamp(v, lo, hi):
 # 1. RobotAPI: Antarmuka Komunikasi Hardware (UDP / ROS)
 # ======================================================================
 class RobotAPI:
-    def __init__(self, esp_ip="192.168.4.1", esp_port=8888, use_ros=False):
+    def __init__(self, esp_ip="192.168.4.10", esp_port=8888, use_ros=False):
         self.esp_ip = esp_ip
         self.esp_port = esp_port
         self.use_ros = use_ros and HAS_ROS
@@ -114,7 +114,7 @@ class RobotAPI:
         self.pose_y = 0.0
         self.pose_yaw = 0.0
         self.wheel_radius = 0.033        # meter (~66mm diameter)
-        self.wheel_base = 0.160          # meter (jarak antar roda kiri-kanan)
+        self.wheel_base = 0.260          # meter (26 cm - sesuai WHEEL_BASE program_dimas & URDF)
         self.ticks_per_rev = 360.0       # resolusi encoder
         self._last_enc_l = None
         self._last_enc_r = None
@@ -288,7 +288,7 @@ class Controller:
         self._lock = threading.RLock()
 
         self.mode = "MANUAL"                  # MANUAL | AUTO
-        self.phase = "IDLE"                   # IDLE | ALIGNING | DRIVING | PICKUP
+        self.phase = "IDLE"                   # IDLE | FOLLOWING | INTAKE | PICKUP | SEARCHING
         self.speed_scale = 1.0
         self.crosshair = dict(CROSSHAIR_DEFAULT)
 
@@ -361,7 +361,7 @@ class Controller:
                 if self.vision and self.vision.set_color_mode(str(value)):
                     self._cancel_pickup()
                     self.robot.stop()
-                    self.phase = "IDLE" if self.mode == "MANUAL" else "ALIGNING"
+                    self.phase = "IDLE" if self.mode == "MANUAL" else "FOLLOWING"
             elif name == "cycle_color":
                 if self.vision:
                     order = ["RED", "GREEN", "BLUE", "YELLOW"]
@@ -370,7 +370,7 @@ class Controller:
                     self.vision.set_color_mode(nxt)
                     self._cancel_pickup()
                     self.robot.stop()
-                    self.phase = "IDLE" if self.mode == "MANUAL" else "ALIGNING"
+                    self.phase = "IDLE" if self.mode == "MANUAL" else "FOLLOWING"
             elif name == "cancel_target":
                 self.cancel_target()
             elif name == "grip":
@@ -379,7 +379,8 @@ class Controller:
                 self.robot.set_lift("UP" if str(value).lower() in ("up", "1", "true") else "DOWN")
             elif name == "speed":
                 step = 0.1 if float(value) > 0 else -0.1
-                self.speed_scale = round(_clamp(self.speed_scale + step, 0.3, 1.5), 2)
+                self.speed_scale = round(_clamp(self.speed_scale + step, 0.2, 1.5), 2)
+                self._event(f"Kecepatan: {int(self.speed_scale * 100)}%")
                 self._save_settings()
             elif name == "crosshair_toggle":
                 self.crosshair["visible"] = not self.crosshair["visible"]
@@ -414,7 +415,7 @@ class Controller:
         self._pending_lock = None
         self._cmd = (0.0, 0.0)
         self.robot.stop()
-        self.phase = "IDLE" if self.mode == "MANUAL" else "ALIGNING"
+        self.phase = "IDLE" if self.mode == "MANUAL" else "FOLLOWING"
         self._event("Target dibatalkan")
 
     def request_lock(self, nx, ny):
@@ -455,7 +456,7 @@ class Controller:
         self._cancel_pickup()
         self.robot.stop()
         self._cmd = (0.0, 0.0)
-        self.phase = "ALIGNING" if mode == "AUTO" else "IDLE"
+        self.phase = "FOLLOWING" if mode == "AUTO" else "IDLE"
         self._event(reason or f"Mode {mode}")
         print(f"[MODE SWITCH] Mode berganti ke: {'MANUAL WSAD' if mode == 'MANUAL' else 'AUTO VISION NAVIGASI'}")
 
@@ -483,7 +484,7 @@ class Controller:
                 if self.vision:
                     self.vision.reset_tracker()
                 self._pickup_idx = -1
-                self.phase = "ALIGNING"
+                self.phase = "FOLLOWING"
                 self._event("Pickup selesai")
                 return 0.0, 0.0
             action, delay = PICKUP_STEPS[self._pickup_idx]
@@ -507,70 +508,95 @@ class Controller:
             norm_x = v["norm_x"]
             vel_x = v.get("vel_x", 0.0)
             frame_w = v.get("frame_w", 320)
+            frame_h = v.get("frame_h", 240)
+            target_cy = v.get("target_cy", frame_h // 2)
+            bbox = v.get("bbox") or (0, 0, 10, 10)
+            bx, by, bw, bh = bbox
+            y_bottom = by + bh
+            y_top = by
 
             # LEAD-PURSUIT: Hitung prediksi posisi masa depan (antisipasi gerakan target)
-            # Jika target bergerak ke kanan, robot belok lebih awal ke kanan mendahului target
-            lead_time = 0.25 # detik antisipasi
+            lead_time = 0.20 # detik antisipasi
             pred_offset_x = (vel_x * lead_time) / (frame_w / 2.0)
             norm_x_lead = float(np.clip(norm_x + pred_offset_x, -1.0, 1.0))
 
             self._last_seen_norm_x = norm_x_lead
+            self._last_seen_cy = target_cy
             self._last_vel_x = vel_x
             self._search_until = 0.0          # Reset waktu pencarian
         else:
             # 2. JIKA TARGET HILANG / TERGELINCIR DARI FRAME:
-            # Lakukan sapuan pencarian (Search Sweep) cerdas ke arah vektor pelarian target.
-            # Konvensi Differential Drive:
-            #   ang > 0: Putar Kiri (CCW)
-            #   ang < 0: Putar Kanan (CW)
-            if self.phase in ("ALIGNING", "DRIVING") and now < self._search_until:
-                # Prioritaskan arah vektor kecepatan pelarian (vel_x), jika diam gunakan posisi terakhir (norm_x)
-                if abs(getattr(self, "_last_vel_x", 0.0)) > 15.0:
-                    turn_sign = -1.0 if self._last_vel_x > 0 else 1.0  # Ke kanan -> ang < 0, Ke kiri -> ang > 0
-                else:
-                    turn_sign = -1.0 if self._last_seen_norm_x > 0 else 1.0
-                return 0.0, float(turn_sign * 1.3 * self.speed_scale)
+            # Cek fail-safe jika target baru saja tenggelam masuk ke blind-spot jepitan
+            last_cy = getattr(self, "_last_seen_cy", 0)
+            if getattr(self, "phase", "") in ("INTAKE", "FOLLOWING", "DRIVING") and last_cy > (v.get("frame_h", 240) * 0.72):
+                self._event("Target tenggelam ke gripper -> pickup")
+                print("[AUTO-GRIP] Target masuk blind spot jepitan! Eksekusi jepit dan angkat...")
+                self.phase = "PICKUP"
+                self._pickup_idx = -1
+                self._pickup_next = now
+                return 0.0, 0.0
 
-            self.phase = "ALIGNING"
+            if self.phase in ("FOLLOWING", "ALIGNING", "DRIVING", "INTAKE", "SEARCHING") and now < self._search_until:
+                self.phase = "SEARCHING"
+                # Target di kanan -> ang > 0, Target di kiri -> ang < 0 (sesuai konvensi fisik robot)
+                turn_sign = 1.0 if getattr(self, "_last_seen_norm_x", 0.0) > 0 else -1.0
+                # Beri dorongan maju pelan agar roda tidak terkunci static friction saat sweeping
+                lin_sweep = 0.06 * self.speed_scale
+                ang_sweep = float(turn_sign * 1.5 * self.speed_scale)
+                return lin_sweep, ang_sweep
+
+            self.phase = "SEARCHING"
             return 0.0, 0.0
 
-        frame_h = v["frame_h"]
-        target_cy = v["target_cy"]
-        target_area = v["target_area"]
-        area_limit = GRIP_AREA_REF * (v["frame_w"] * frame_h) / REF_AREA
+        # CEK SYARAT GRIP / PICKUP:
+        # Syarat sesuai karakteristik kamera & gripper:
+        # Objek sudah di separuh bawah layar (target_cy > frame_h * 0.52)
+        in_lower_half = target_cy > (frame_h * 0.52)
+        # Objek tenggelam ke bawah: dasar bbox menyentuh dasar frame, cy sangat bawah, dan sisi atas sudah ikut turun
+        sinking_at_bottom = (y_bottom >= frame_h - 4) and (target_cy >= frame_h * 0.75) and (y_top >= frame_h * 0.48)
 
-        # Gunakan norm_x_lead untuk koreksi sudut belok yang antisipatif
-        if abs(norm_x_lead) > 0.35:
-            self.phase = "ALIGNING"
-
-        if self.phase not in ("ALIGNING", "DRIVING"):
-            self.phase = "ALIGNING"
-
-        if self.phase == "ALIGNING":
-            lin = 0.0
-            ang = float(np.clip(-2.5 * norm_x_lead, -1.8, 1.8))
-            if abs(norm_x_lead) <= 0.08:
-                self.phase = "DRIVING"
-            return lin, ang
-
-        # DRIVING: maju adaptif, kecepatan turun saat mendekat
-        dist_ratio = max(0.0, float(frame_h - target_cy) / float(frame_h))
-        lin = float(np.clip(0.12 + 0.25 * dist_ratio, 0.12, 0.32)) * self.speed_scale
-        lin = min(lin, MAX_LINEAR)
-        ang = -1.3 * norm_x_lead
-
-        # Catat waypoint lokal terakhir di odometri saat target terlihat jelas
-        self._last_target_x = getattr(self.robot, "pose_x", 0.0)
-        self._last_target_y = getattr(self.robot, "pose_y", 0.0)
-
-        # Kondisi pemicu Pickup: target di tepi bawah frame (blind spot dekat gripper) atau area besar
-        if target_cy > (frame_h - 4) or target_area > area_limit:
+        if in_lower_half and sinking_at_bottom:
             self._event("Target tercapai -> pickup")
-            print("[AUTO-GRIP] Target tercapai! Eksekusi jepit dan angkat...")
+            print("[AUTO-GRIP] Target tenggelam di depan gripper! Eksekusi jepit dan angkat...")
             self.phase = "PICKUP"
             self._pickup_idx = -1
             self._pickup_next = now
             return 0.0, 0.0
+
+        # ==============================================================
+        # CONTINUOUS ARC STEERING (SMOOTH COUPLED CONTROL)
+        # Menghapus sistem kaku "align dulu baru maju" yang menyebabkan motor stall/kekunci.
+        # Linear speed (v) dan Angular speed (w) bekerja simultan membentuk lintasan kurva
+        # mulus (seperti visual servoing / pursuit target secara realtime).
+        # ==============================================================
+
+        if in_lower_half:
+            # FASE INTAKE: Target sudah sangat dekat di depan sela capit
+            self.phase = "INTAKE"
+            lin = float(0.14 * self.speed_scale)
+            ang = float(np.clip(1.2 * norm_x_lead, -1.2, 1.2))
+            return lin, ang
+
+        # FASE FOLLOWING (Pursuit Kontinu - Melacak & Mengejar Realtime):
+        self.phase = "FOLLOWING"
+
+        # 1. Base Linear Speed berdasarkan perkiraan jarak (posisi Y target di frame):
+        #    Target jauh (atas frame) -> melaju lebih kencang
+        #    Target mendekat (bawah frame) -> melambat proporsional
+        dist_ratio = max(0.0, float(frame_h - target_cy) / float(frame_h))
+        v_base = 0.14 + (0.22 * dist_ratio)
+
+        # 2. Curvature Modulation:
+        #    Jika sudut target melenceng ke samping, kecepatan maju diturunkan secara halus
+        #    agar radius belokan lebih rapat, TETAPI TIDAK PERNAH NOL (minimal 0.10 m/s).
+        #    Roda yang terus berputar (rolling) menjaga torsi motor tetap optimal tanpa stall!
+        steer_factor = max(0.40, 1.0 - 0.60 * abs(norm_x_lead))
+        lin = float(np.clip(v_base * steer_factor, 0.10, MAX_LINEAR)) * self.speed_scale
+
+        # 3. Angular Speed:
+        #    Respon kemudi proporsional langsung terhadap deviasi horizontal (norm_x_lead)
+        ang = float(np.clip(2.2 * norm_x_lead, -2.0, 2.0))
+
         return lin, ang
 
     # ------------------------------------------------------------------
@@ -591,7 +617,7 @@ class Controller:
                     self._cancel_pickup()
                     if self.mode != "AUTO":
                         self.mode = "AUTO"
-                    self.phase = "ALIGNING"
+                    self.phase = "FOLLOWING"
                     self._event("Target terkunci")
                 else:
                     self._event("Lock gagal")
@@ -612,7 +638,7 @@ class Controller:
                     self.robot.stop()
 
                 if self.phase != "PICKUP":
-                    self.phase = "ALIGNING" if self.mode == "AUTO" else "IDLE"
+                    self.phase = "SEARCHING" if self.mode == "AUTO" else "IDLE"
 
             if self.mode == "MANUAL":
                 lin, ang = self._manual_command(now)
@@ -637,7 +663,7 @@ class Controller:
             self._held = set()
             self._cancel_pickup()
             if self.phase == "PICKUP":
-                self.phase = "ALIGNING"
+                self.phase = "FOLLOWING"
             self.robot.stop()
 
     # ------------------------------------------------------------------

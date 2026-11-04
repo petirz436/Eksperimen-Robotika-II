@@ -210,8 +210,8 @@
         <span class="blank"></span>
       </div>
       <div class="row">
-        <button id="btnSpdDn" title="Kurangi kecepatan">Speed - <kbd>-</kbd></button>
-        <button id="btnSpdUp" title="Tambah kecepatan">Speed + <kbd>=</kbd></button>
+        <button id="btnSpdDn" title="Kurangi kecepatan (tombol - atau [)">Speed - <kbd>-</kbd> / <kbd>[</kbd></button>
+        <button id="btnSpdUp" title="Tambah kecepatan (tombol =/+ atau ])">Speed + <kbd>+</kbd> / <kbd>]</kbd></button>
       </div>
     </section>
 
@@ -268,11 +268,24 @@
     </section>
 
     <section class="card">
-      <h2>Developer &amp; Servis</h2>
-      <div class="row">
-        <a id="btnOta" class="row-link" href="http://192.168.4.1/update" target="_blank" rel="noopener">OTA Firmware Update (ESP32) ↗</a>
+      <h2>Developer &amp; Servis (OTA Update)</h2>
+      <div style="margin-bottom:8px">
+        <label for="otaTargetSelect" style="font-size:11px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted)">Target ESP Flash:</label>
+        <select id="otaTargetSelect" style="width:100%;margin-bottom:8px">
+          <option value="http://192.168.4.10/update" data-name="ESP32-CAM" selected>ESP32-CAM (Streamer · 192.168.4.10:80)</option>
+          <option value="http://192.168.4.1/update" data-name="ESP32-Control">ESP32-Control (Motor/Servo · 192.168.4.1:80)</option>
+        </select>
       </div>
-      <div class="hint">Upload biner .bin langsung via Wi-Fi tanpa mencopot kabel robot.</div>
+      <div class="row">
+        <a id="btnOta" class="row-link" href="http://192.168.4.10/update" target="_blank" rel="noopener">Buka Halaman Flash ESP32-CAM ↗</a>
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px">Flash Nirkabel dari HMI (.bin):</div>
+        <input type="file" id="hmiOtaFile" accept=".bin" style="width:100%;font-size:11px;margin-bottom:6px">
+        <button id="btnHmiFlash" style="width:100%;padding:8px;font-size:12px;font-weight:600;background:var(--b-blue);color:var(--t-blue);border:1px solid transparent;border-radius:6px;cursor:pointer">Flash ke Target Terpilih</button>
+        <div id="hmiOtaStatus" style="font-size:11px;font-weight:600;margin-top:6px;min-height:16px;text-align:center"></div>
+      </div>
+      <div class="hint">Pilih target board (ESP32-CAM di 192.168.4.10 atau ESP32-Control di 192.168.4.1), lalu buka halaman flash atau upload biner firmware .bin langsung tanpa kabel.</div>
     </section>
 
     <section class="card">
@@ -303,7 +316,7 @@
       <tr><td><kbd>R</kbd></td><td>Batalkan target</td></tr>
       <tr><td><kbd>J</kbd> / <kbd>K</kbd></td><td>Gripper jepit / buka</td></tr>
       <tr><td><kbd>U</kbd> / <kbd>I</kbd></td><td>Lift naik / turun</td></tr>
-      <tr><td><kbd>=</kbd> / <kbd>-</kbd></td><td>Kecepatan naik / turun (30% - 150%)</td></tr>
+      <tr><td><kbd>+</kbd> / <kbd>-</kbd> atau <kbd>]</kbd> / <kbd>[</kbd></td><td>Kecepatan naik / turun (20% - 150%)</td></tr>
       <tr><td><kbd>O</kbd></td><td>Toggle Rekam Video HUD &amp; Blackbox Telemetry (CSV)</td></tr>
       <tr><td><kbd>P</kbd></td><td>Toggle Audio Feedback (Suara radar &amp; alarm)</td></tr>
     </table>
@@ -326,10 +339,16 @@ const $ = (id) => document.getElementById(id);
 const video = $("video"), hud = $("hud"), ctx = hud.getContext("2d");
 let state = null, serverOk = false;
 
-// ------------------------------------------------------------ API
-function post(path, body) {
-  return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
-    .catch(() => {});
+async function post(path, body) {
+  try {
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    if (res.ok) {
+      try { return await res.json(); } catch (e) { return { ok: true }; }
+    }
+    return { ok: false };
+  } catch (e) {
+    return { ok: false };
+  }
 }
 const action = (name, value) => post("/api/action", { name, value });
 
@@ -422,77 +441,56 @@ function soundLinkLost() {
   playTone(330, "sine", 0.18, 0.14, 0.15);
 }
 
-// ------------------------------------------------------------ Flight Data Recorder (Blackbox)
-let mediaRecorder = null;
-let recordedChunks = [];
+// ------------------------------------------------------------ Flight Data Recorder (Server Video & Blackbox CSV)
 let telemetryLog = [];
 let recStartTime = 0;
 let isRecording = false;
 
-function toggleRecord() {
-  if (isRecording) stopRecording();
-  else startRecording();
+async function toggleRecord() {
+  if (isRecording) await stopRecording();
+  else await startRecording();
 }
 
-function startRecording() {
+async function startRecording() {
   getAudioContext();
-  recordedChunks = [];
   telemetryLog = [];
   recStartTime = Date.now();
 
-  let stream = null;
   try {
-    if (hud.captureStream) stream = hud.captureStream(25);
-  } catch (e) {}
-
-  if (stream && typeof MediaRecorder !== "undefined") {
-    let options = { mimeType: "video/webm;codecs=vp9" };
-    if (!MediaRecorder.isTypeSupported || !MediaRecorder.isTypeSupported(options.mimeType)) {
-      options = { mimeType: "video/webm" };
-      if (MediaRecorder.isTypeSupported && !MediaRecorder.isTypeSupported(options.mimeType)) options = {};
+    const res = await post("/api/record", { action: "start" });
+    if (res && res.ok) {
+      isRecording = true;
+      $("btnRec").classList.add("rec-active");
+      $("btnRec").textContent = "■ REC 00:00";
+      playTone(880, "sine", 0.1, 0, 0.2);
     }
-    try {
-      mediaRecorder = new MediaRecorder(stream, options);
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) recordedChunks.push(e.data);
-      };
-      mediaRecorder.start(500);
-    } catch (e) {
-      console.warn("MediaRecorder start error:", e);
-      mediaRecorder = null;
-    }
+  } catch (e) {
+    console.error("Gagal start recording:", e);
   }
-
-  isRecording = true;
-  $("btnRec").classList.add("rec-active");
-  $("btnRec").textContent = "■ REC 00:00";
-  playTone(880, "sine", 0.1, 0, 0.2);
 }
 
-function stopRecording() {
+async function stopRecording() {
   if (!isRecording) return;
   isRecording = false;
   $("btnRec").classList.remove("rec-active");
   $("btnRec").innerHTML = `<span class="dot"></span> REC <kbd>O</kbd>`;
   playTone(440, "sine", 0.15, 0, 0.2);
 
-  const dur = Math.round((Date.now() - recStartTime) / 1000);
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
 
-  // 1. Download Video File
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.onstop = () => {
-      if (recordedChunks.length > 0) {
-        const blob = new Blob(recordedChunks, { type: "video/webm" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `eksbot2_flight_${ts}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    };
-    try { mediaRecorder.stop(); } catch (e) {}
+  // 1. Download Video MP4 Asli dari Server
+  try {
+    const res = await post("/api/record", { action: "stop" });
+    if (res && res.download_url) {
+      const a = document.createElement("a");
+      a.href = res.download_url;
+      a.download = res.file || `eksbot2_flight_${ts}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  } catch (e) {
+    console.error("Gagal stop recording:", e);
   }
 
   // 2. Download CSV Telemetry Blackbox
@@ -505,12 +503,14 @@ function stopRecording() {
     ];
     const csvContent = "data:text/csv;charset=utf-8," + 
       headers.join(",") + "\n" + 
-      telemetryLog.map((row) => row.join(",")).join("\n");
+      telemetryLog.map((r) => r.join(",")).join("\n");
     const encodedUri = encodeURI(csvContent);
     const a = document.createElement("a");
     a.href = encodedUri;
     a.download = `eksbot2_telemetry_${ts}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
   }
 }
 
@@ -554,8 +554,8 @@ const ACTIONS = {
   KeyR: () => { pulseButton("btnCancel"); action("cancel_target"); },
   KeyJ: () => { pulseButton("btnGripClose"); action("grip", "close"); }, KeyK: () => { pulseButton("btnGripOpen"); action("grip", "open"); },
   KeyU: () => { pulseButton("btnLiftUp"); action("lift", "up"); }, KeyI: () => { pulseButton("btnLiftDown"); action("lift", "down"); },
-  Equal: () => { pulseButton("btnSpdUp"); action("speed", 1); }, NumpadAdd: () => { pulseButton("btnSpdUp"); action("speed", 1); },
-  Minus: () => { pulseButton("btnSpdDn"); action("speed", -1); }, NumpadSubtract: () => { pulseButton("btnSpdDn"); action("speed", -1); },
+  Equal: () => { pulseButton("btnSpdUp"); action("speed", 1); }, NumpadAdd: () => { pulseButton("btnSpdUp"); action("speed", 1); }, BracketRight: () => { pulseButton("btnSpdUp"); action("speed", 1); },
+  Minus: () => { pulseButton("btnSpdDn"); action("speed", -1); }, NumpadSubtract: () => { pulseButton("btnSpdDn"); action("speed", -1); }, BracketLeft: () => { pulseButton("btnSpdDn"); action("speed", -1); },
   KeyC: () => { pulseButton("btnXhair"); action("crosshair_toggle"); },
   KeyT: () => { pulseButton("btnTheme"); toggleTheme(); },
   KeyH: () => { pulseButton("btnLegend"); toggleLegend(); },
@@ -620,6 +620,54 @@ $("btnLegendClose").onclick = () => toggleLegend(false);
 $("legend").addEventListener("click", (e) => { if (e.target.id === "legend") toggleLegend(false); });
 $("btnAudio").onclick = () => { pulseButton("btnAudio"); toggleAudio(); };
 $("btnRec").onclick = () => { pulseButton("btnRec"); toggleRecord(); };
+
+// ------------------------------------------------------------ OTA Target Switch & Flash
+const otaSel = $("otaTargetSelect");
+const btnOta = $("btnOta");
+if (otaSel && btnOta) {
+  otaSel.addEventListener("change", () => {
+    btnOta.href = otaSel.value;
+    const opt = otaSel.options[otaSel.selectedIndex];
+    btnOta.textContent = `Buka Halaman Flash ${opt.dataset.name || "Target"} ↗`;
+  });
+}
+
+const btnHmiFlash = $("btnHmiFlash");
+if (btnHmiFlash) {
+  btnHmiFlash.onclick = async () => {
+    const fileEl = $("hmiOtaFile");
+    const stEl = $("hmiOtaStatus");
+    const file = fileEl && fileEl.files ? fileEl.files[0] : null;
+    if (!file) {
+      alert("Pilih file binary firmware (.bin) terlebih dahulu!");
+      return;
+    }
+    const targetUrl = otaSel ? otaSel.value : "http://192.168.4.10/update";
+    const targetName = otaSel ? otaSel.options[otaSel.selectedIndex].dataset.name : "ESP32";
+
+    btnHmiFlash.disabled = true;
+    stEl.style.color = "#38bdf8";
+    stEl.textContent = `Mengunggah ke ${targetName}... jangan matikan robot!`;
+
+    try {
+      const res = await fetch(targetUrl, { method: "POST", body: file });
+      if (res.ok) {
+        stEl.style.color = "#4ade80";
+        stEl.textContent = `SUKSES! ${targetName} sedang reboot...`;
+        setTimeout(() => { stEl.textContent = ""; btnHmiFlash.disabled = false; }, 7000);
+      } else {
+        stEl.style.color = "#f87171";
+        stEl.textContent = `Gagal flash (${res.status}): pastikan board menyala.`;
+        btnHmiFlash.disabled = false;
+      }
+    } catch (err) {
+      stEl.style.color = "#f87171";
+      stEl.textContent = `Koneksi gagal (${err.message}). Buka langsung tombol di atas.`;
+      btnHmiFlash.disabled = false;
+    }
+  };
+}
+
 document.querySelectorAll("button").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()));
 
 // ------------------------------------------------------------ Crosshair panel

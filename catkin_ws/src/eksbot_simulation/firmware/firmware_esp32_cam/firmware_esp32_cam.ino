@@ -170,25 +170,44 @@ static esp_err_t stream_handler(httpd_req_t *req) {
 static const char OTA_HTML[] =
   "<!DOCTYPE html><html lang='id'><head><meta charset='utf-8'>"
   "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-  "<title>Eksbot2 OTA Firmware Update</title>"
+  "<title>ESP32-CAM OTA Firmware Update</title>"
   "<style>"
-  "body{font-family:system-ui,sans-serif;background:#0c0d10;color:#ededf0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}"
-  ".card{background:#18191e;border:1px solid #282a32;border-radius:12px;padding:24px;width:min(380px,92vw);text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.5)}"
-  "h1{font-size:18px;margin:0 0 10px;font-weight:650}p{font-size:13px;color:#9a9aa3;margin:0 0 18px}"
-  "input[type=file]{width:100%;padding:8px;border:1px dashed #3f4250;border-radius:8px;margin-bottom:14px;background:#101115;color:#ededf0;box-sizing:border-box}"
-  "button{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:10px 16px;font-weight:600;width:100%;cursor:pointer}"
-  "button:disabled{opacity:0.5;cursor:not-allowed}#status{margin-top:14px;font-size:13px;font-weight:600;min-height:20px}"
-  ".back{display:inline-block;margin-top:14px;font-size:12px;color:#3b82f6;text-decoration:none}"
+  "body{font-family:system-ui,-apple-system,sans-serif;background:#0c0d10;color:#ededf0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;box-sizing:border-box}"
+  ".card{background:#18191e;border:1px solid #282a32;border-radius:14px;padding:24px;width:min(420px,100%);text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.6)}"
+  ".badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.5px;background:#3b82f622;color:#60a5fa;border:1px solid #3b82f655;margin-bottom:12px}"
+  "h1{font-size:19px;margin:0 0 6px;font-weight:700}p{font-size:13px;color:#9a9aa3;margin:0 0 16px;line-height:1.4}"
+  ".selector-title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;margin-bottom:8px;text-align:left;font-weight:600}"
+  ".target-switch{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px}"
+  ".target-btn{padding:10px 8px;border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;border:1px solid #282a32;color:#9ca3af;background:#111216;display:flex;flex-direction:column;align-items:center;gap:3px;transition:all .15s}"
+  ".target-btn span{font-size:10px;opacity:0.75}"
+  ".target-btn.active{border-color:#3b82f6;color:#fff;background:#1d4ed844;box-shadow:0 0 0 1px #3b82f6 inset}"
+  "input[type=file]{width:100%;padding:10px;border:1px dashed #3f4250;border-radius:8px;margin-bottom:14px;background:#101115;color:#ededf0;box-sizing:border-box;font-size:12px}"
+  "button{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:11px 16px;font-weight:700;width:100%;cursor:pointer;font-size:14px;transition:background .15s}"
+  "button:hover:not(:disabled){background:#2563eb}"
+  "button:disabled{opacity:0.5;cursor:not-allowed}"
+  "#status{margin-top:14px;font-size:13px;font-weight:600;min-height:20px}"
+  ".nav-bar{margin-top:18px;padding-top:14px;border-top:1px solid #282a32;display:flex;justify-content:space-between;font-size:12px}"
+  ".nav-bar a{color:#60a5fa;text-decoration:none;font-weight:500}"
+  ".nav-bar a:hover{text-decoration:underline}"
   "</style></head><body><div class='card'>"
-  "<h1>Eksbot2 OTA Update</h1><p>Pilih file binary firmware (.bin) hasil kompilasi untuk update wireless.</p>"
+  "<div class='badge'>STREAMER KAMERA &amp; BRIDGE</div>"
+  "<h1>ESP32-CAM OTA Update</h1>"
+  "<p>Upload binary (.bin) untuk memperbarui firmware ESP32-CAM (IP: 192.168.4.10:80).</p>"
+  "<div class='selector-title'>Pilih Target Board ESP:</div>"
+  "<div class='target-switch'>"
+  "<a class='target-btn' href='http://192.168.4.1/update'><b>ESP-Control</b><span>192.168.4.1 ↗</span></a>"
+  "<a class='target-btn active' href='#'><b>ESP-CAM</b><span>192.168.4.10 (Saat Ini)</span></a>"
+  "</div>"
   "<input type='file' id='fw' accept='.bin'>"
-  "<button id='btn' onclick='startUpdate()'>Flash Firmware (.bin)</button>"
+  "<button id='btn' onclick='startUpdate()'>Flash ESP32-CAM (.bin)</button>"
   "<div id='status'></div>"
-  "<a class='back' href='http://192.168.4.1/stream'>← Cek Stream Kamera</a>"
-  "</div><script>"
+  "<div class='nav-bar'>"
+  "<a href='http://192.168.4.10/stream' target='_blank'>← Cek Stream Kamera</a>"
+  "<a href='http://192.168.4.1/update'>OTA ESP32-Control (192.168.4.1) ↗</a>"
+  "</div></div><script>"
   "async function startUpdate(){"
   "const f=document.getElementById('fw').files[0];"
-  "if(!f)return alert('Pilih file .bin!');"
+  "if(!f)return alert('Pilih file .bin firmware CAM!');"
   "const btn=document.getElementById('btn');const st=document.getElementById('status');"
   "btn.disabled=true;st.style.color='#38bdf8';st.textContent='Mengunggah & Flash... jangan matikan robot!';"
   "try{const res=await fetch('/update',{method:'POST',body:f});"
@@ -239,7 +258,7 @@ static esp_err_t ota_post_handler(httpd_req_t *req) {
 
 void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.server_port = 80;
+  config.server_port = 80;   // Port 80 default HTTP MJPEG stream (http://<ip>/stream)
   config.lru_purge_enable = true;
   config.max_open_sockets = 4;
   config.recv_wait_timeout = 3;
@@ -268,8 +287,8 @@ void startCameraServer() {
     httpd_register_uri_handler(stream_httpd, &stream_uri);
     httpd_register_uri_handler(stream_httpd, &ota_get_uri);
     httpd_register_uri_handler(stream_httpd, &ota_post_uri);
-    Serial.println("MJPEG stream aktif di http://192.168.4.1/stream");
-    Serial.println("OTA Update Web Page aktif di http://192.168.4.1/update");
+    Serial.println("MJPEG stream aktif di http://192.168.4.10/stream (port 80)");
+    Serial.println("OTA Update Web Page aktif di http://192.168.4.10/update");
   } else {
     Serial.println("Gagal memulai HTTP stream pada port 80.");
   }
@@ -352,33 +371,62 @@ static bool jsonNumber(const char *buf, const char *key, float *out) {
 }
 
 static void forwardToControl(float lin, float ang, int grip, int lift) {
-  // Format yang dipahami firmware_esp32_control.ino
+  // 1. Teruskan kontrol nirkabel via Wi-Fi UDP ke ESP32 Sistem Kontrol (192.168.4.1)
+  char jsonBuf[128];
+  int jlen = snprintf(jsonBuf, sizeof(jsonBuf),
+                      "{\"cmd\":\"move\",\"lin\":%.2f,\"ang\":%.2f,\"grip\":%d,\"lift\":%d}\n",
+                      lin, ang, grip, lift);
+  udp.beginPacket(IPAddress(192, 168, 4, 1), UDP_PORT);
+  udp.write((const uint8_t*)jsonBuf, jlen);
+  udp.endPacket();
+
+  // 2. Teruskan juga lewat kabel Serial2 sebagai backup jika kabel terpasang
   Serial2.printf("CMD:%.2f,%.2f,%d,%d\n", lin, ang, grip, lift);
+
   if (millis() - lastDebugMs > 300) {   // Batasi debug print agar loop tidak melambat
     lastDebugMs = millis();
-    Serial.printf("[BRIDGE -> SERIAL2] CMD:%.2f,%.2f,%d,%d\n", lin, ang, grip, lift);
+    Serial.printf("[BRIDGE -> NIRKABEL & SERIAL2] Lin:%.2f | Ang:%.2f | Grip:%d | Lift:%d\n", lin, ang, grip, lift);
   }
 }
 
 void setup() {
   Serial.begin(115200);
-  Serial2.begin(115200, SERIAL_8N1, UART2_RX_PIN, UART2_TX_PIN);   // Kabel ke ESP32 Kontroler
+  Serial2.begin(115200, SERIAL_8N1, UART2_RX_PIN, UART2_TX_PIN);   // Kabel ke ESP32 Kontroler (Cadangan)
   delay(500);
-  Serial.println("\n=== ESP32 CAM + UDP BRIDGE (AutoStack Eksbot2) ===");
+  Serial.println("\n=== ESP32 CAM + UDP BRIDGE NIRKABEL (AutoStack Eksbot2) ===");
 
   // 1. Kamera dulu (urutan sama dengan tescamesp.cpp). Jika gagal, AP TETAP dinyalakan
   //    supaya board tetap bisa dikoneksikan & didiagnosis, kamera dicoba ulang di loop().
   camera_ready = initCamera();
   lastCameraTry = millis();
 
-  // 2. Wi-Fi Access Point
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
+  // 2. Wi-Fi: Hubungkan ke AP dimas_asoy_geboy (ESP32-Control) dengan IP statis 192.168.4.10
+  WiFi.mode(WIFI_STA);
+  IPAddress local_IP(192, 168, 4, 10);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.config(local_IP, gateway, subnet);
+  WiFi.begin(AP_SSID, AP_PASS);
   WiFi.setSleep(false);   // Matikan power-save Wi-Fi: mengurangi jitter/latensi
-  Serial.print("ESP32-CAM Access Point Aktif. SSID: ");
-  Serial.print(AP_SSID);
-  Serial.print(" | IP: ");
-  Serial.println(WiFi.softAPIP());
+
+  Serial.printf("\n[ESP32-CAM] Menyambungkan ke Wi-Fi AP '%s'...\n", AP_SSID);
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 3500) {
+    delay(150);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("[ESP32-CAM] Terhubung ke AP! IP: %s (Stream port 80)\n", WiFi.localIP().toString().c_str());
+  } else {
+    // Fallback ke SoftAP jika ESP32-Control belum menyala
+    Serial.println("[ESP32-CAM] AP tidak ditemukan -> Menyalakan SoftAP fallback (192.168.4.10)...");
+    WiFi.mode(WIFI_AP);
+    WiFi.softAPConfig(local_IP, local_IP, subnet);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    Serial.printf("[ESP32-CAM] SoftAP Aktif: %s | IP: %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+  }
 
   // 3. Server stream + UDP
   startCameraServer();
@@ -388,7 +436,7 @@ void setup() {
 }
 
 void loop() {
-  // 1. Baca data telemetri baterai dari ESP32-Control via Serial2
+  // 1. Baca data telemetri baterai dari ESP32-Control via Serial2 (jika kabel terpasang)
   static float lastBattV = 12.0f;
   static int lastBattPct = 95;
   static char s2Buf[32];
@@ -415,7 +463,7 @@ void loop() {
     }
   }
 
-  // 2. Kuras paket UDP kontrol dari Laptop
+  // 2. Kuras paket UDP dari Laptop / ESP32-Control
   bool got = false;
   float lin = 0.0f, ang = 0.0f;
   char packetBuffer[256];
@@ -424,11 +472,31 @@ void loop() {
   static unsigned long lastBattUdpMs = 0;
 
   while (udp.parsePacket() > 0) {
-    lastLaptopIP = udp.remoteIP();
-    lastLaptopPort = udp.remotePort();
+    IPAddress remote = udp.remoteIP();
+    uint16_t rport = udp.remotePort();
     int len = udp.read(packetBuffer, sizeof(packetBuffer) - 1);
     if (len <= 0) continue;
     packetBuffer[len] = 0;
+
+    // Abaikan paket loopback dari ESP32-CAM sendiri (SoftAP maupun STA IP)
+    if (remote == WiFi.softAPIP() || remote == WiFi.localIP()) continue;
+
+    // Cek apakah paket adalah telemetri baterai nirkabel dari ESP32-Control
+    float tBatt = 0.0f;
+    if (jsonNumber(packetBuffer, "batt", &tBatt)) {
+      lastBattV = tBatt;
+      float tPct = 0.0f;
+      if (jsonNumber(packetBuffer, "pct", &tPct)) {
+        lastBattPct = (int)tPct;
+      }
+      continue;
+    }
+
+    // Jika pengirim bukan ESP32-Control, simpan sebagai Laptop IP
+    if (remote != IPAddress(192, 168, 4, 1)) {
+      lastLaptopIP = remote;
+      lastLaptopPort = rport;
+    }
 
     float tLin, tAng, tGrip, tLift;
     if (jsonNumber(packetBuffer, "lin", &tLin) && jsonNumber(packetBuffer, "ang", &tAng)) {

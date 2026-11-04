@@ -191,7 +191,7 @@ class ESPCamReader:
         self._close_stream()
 
 
-def open_source(kind, esp_ip="192.168.4.1", esp_url=None, ros_topic="/camera/image_raw", webcam_index=0):
+def open_source(kind, esp_ip="192.168.4.10", esp_url=None, ros_topic="/camera/image_raw", webcam_index=0):
     """Factory pembuat objek sumber kamera: kind in {'esp', 'sim', 'webcam'}."""
     if kind == "esp":
         return ESPCamReader(esp_url or f"http://{esp_ip}/stream")
@@ -390,17 +390,39 @@ class VisionEngine:
             self.reset_tracker()
             return False
 
-    def lock_at_point(self, frame, px, py, roi=100):
+    def lock_at_point(self, frame, px, py, roi=50):
         """
         Lock target pada titik (px, py) piksel.
-        Jika titik berada di dalam salah satu kandidat kontur warna -> pakai bbox kontur itu.
-        Jika tidak -> buat ROI roi x roi di sekitar titik (seperti visionTarget.py).
+        1. Snap ke kontur warna yang mencakup klik (toleransi 15px).
+        2. Jika klik sedikit meleset, snap ke kontur terdekat dalam radius 45px.
+        3. Jika tidak ada kontur warna sama sekali, buat ROI ukuran kubus proporsional (50x50).
         """
+        # 1. Hit test langsung dengan toleransi 15px
         for t in self.last_targets:
             x, y, w, h = t["bbox"]
-            if x <= px <= x + w and y <= py <= y + h:
+            if (x - 15) <= px <= (x + w + 15) and (y - 15) <= py <= (y + h + 15):
+                print(f"[VISION] Lock snap ke kontur Kubus #{t['id']} {t['bbox']}")
                 return self.lock_target_bbox(frame, t["bbox"])
-        return self.lock_target_bbox(frame, (px - roi // 2, py - roi // 2, roi, roi))
+
+        # 2. Cari kontur terdekat dalam radius 45px
+        best_t = None
+        best_dist = 45.0
+        for t in self.last_targets:
+            cx, cy = t["center"]
+            dist = float(np.hypot(px - cx, py - cy))
+            if dist < best_dist:
+                best_dist = dist
+                best_t = t
+
+        if best_t is not None:
+            print(f"[VISION] Lock snap radius ke Kubus #{best_t['id']} {best_t['bbox']}")
+            return self.lock_target_bbox(frame, best_t["bbox"])
+
+        # 3. Fallback jika tidak ada kontur: buat ROI ukuran kubus (50x50 bukan 100x100)
+        h_f, w_f = frame.shape[:2]
+        roi_w = min(roi, w_f // 4)
+        roi_h = min(roi, h_f // 4)
+        return self.lock_target_bbox(frame, (px - roi_w // 2, py - roi_h // 2, roi_w, roi_h))
 
     # ------------------------------------------------------------------
     # Pemrosesan frame & Fusi Simultan

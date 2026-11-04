@@ -22,6 +22,7 @@ import time
 import webbrowser
 
 import cv2 as cv
+import numpy as np
 
 from hmi import HMIServer
 from robot_api import RobotAPI, Controller
@@ -37,9 +38,9 @@ def parse_args():
     p = argparse.ArgumentParser(description="Eksbot2 Pilot Console")
     p.add_argument("--source", choices=["esp", "sim", "webcam"], default="sim" if launched_by_ros else "esp",
                    help="Sumber kamera & jalur perintah (default: esp, atau sim jika dari roslaunch)")
-    p.add_argument("--esp-ip", default="192.168.4.1", help="IP ESP32-CAM (SoftAP)")
-    p.add_argument("--esp-port", type=int, default=8888, help="Port UDP kontrol ESP32-CAM")
-    p.add_argument("--stream-url", default=None, help="Override URL stream MJPEG (default http://<esp-ip>/stream)")
+    p.add_argument("--esp-ip", default="192.168.4.10", help="IP ESP32-CAM (default: 192.168.4.10)")
+    p.add_argument("--esp-port", type=int, default=8888, help="Port UDP kontrol ESP32-CAM (default: 8888)")
+    p.add_argument("--stream-url", default=None, help="Override URL stream MJPEG (default: http://<esp-ip>/stream)")
     p.add_argument("--image-topic", default="/camera/image_raw", help="Topik kamera ROS (mode sim)")
     p.add_argument("--webcam", type=int, default=0, help="Index webcam (mode webcam)")
     p.add_argument("--port", type=int, default=8000, help="Port HMI web (dicoba naik jika terpakai)")
@@ -52,7 +53,7 @@ def parse_args():
 # Jendela OpenCV opsional (--gui): overlay sederhana dari telemetri
 # ============================================================
 GUI_KEYS = {
-    ord('w'): "fwd", ord('s'): "back", ord('a'): "left", ord('d'): "right",
+    ord('w'): "fwd", ord('s'): "back", ord('a'): "right", ord('d'): "left",
 }
 GUI_ACTIONS = {
     32: ("estop", None), ord('m'): ("toggle_mode", None),
@@ -114,7 +115,8 @@ def main():
         rospy.init_node("eksbot2_main_node", anonymous=True, disable_signals=True)
         print("[MAIN] Mode ROS Simulasi: perintah -> /cmd_vel, kamera <- " + args.image_topic)
     else:
-        print(f"[MAIN] Mode robot fisik TANPA ROS: kamera <- http://{args.esp_ip}/stream, perintah -> UDP {args.esp_ip}:{args.esp_port}")
+        stream_desc = args.stream_url or f"http://{args.esp_ip}/stream"
+        print(f"[MAIN] Mode robot fisik TANPA ROS: kamera <- {stream_desc}, perintah -> UDP {args.esp_ip}:{args.esp_port}")
 
     cam = open_source(args.source, esp_ip=args.esp_ip, esp_url=args.stream_url,
                       ros_topic=args.image_topic, webcam_index=args.webcam)
@@ -154,13 +156,14 @@ def main():
             if ok:
                 last_frame_time = now
                 frame_out, tel = ctrl.update(frame)
-                hmi.publish(frame_out)
+                hmi.publish(frame_out, tel)
                 if args.gui:
                     gui_state["size"] = (frame_out.shape[1], frame_out.shape[0])
                     cv.imshow(window, draw_gui_overlay(frame_out, tel))
             else:
-                # Tidak ada frame: berhenti demi keamanan (kirim STOP 5x/detik, juga heartbeat failsafe ESP)
-                if now - last_frame_time > 1.0 and now - last_idle_send > 0.2:
+                # Menunggu frame baru dari stream kamera:
+                # Jika link kamera putus > 1.5s, beri sinyal idle failsafe
+                if now - last_frame_time > 1.5 and now - last_idle_send > 0.2:
                     ctrl.idle()
                     last_idle_send = now
                 time.sleep(0.003)

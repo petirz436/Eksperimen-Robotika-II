@@ -12,8 +12,8 @@
 #define IN4_PIN 18
 
 //PIN SERVO
-#define SERVO_GRIPPER_PIN 7
-#define SERVO_LIFT_PIN    3
+#define SERVO_GRIPPER_PIN 5
+#define SERVO_LIFT_PIN    25
 
 //WIFI
 const char* AP_SSID = "dimas_asoy_geboy";

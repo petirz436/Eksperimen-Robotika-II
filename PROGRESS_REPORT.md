@@ -294,6 +294,92 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
      - `test_integration.py`: 22/22 skenario integrasi PASS.
      - Kompilasi `arduino-cli` dari folder `firmware/` baru: 100% SUKSES (CAM 79%, Control 23%).
 
+### Prompt 27: Penyesuaian Konfigurasi Pin dan Wi-Fi dengan Folder `program_dimas` untuk Komunikasi Nirkabel antar ESP
+- **User Prompt**: di `firmware_esp32_control.ino`, `firmware_esp32_cam.ino` dan program robot lainya. sesuaikan dengan konfirgurasi pin dan wifi nya SAJA dengan yang ada di folder program_dimas. agar antar esp bisa nirkabel
+- **Tindakan & Progress**:
+  1. **Audit & Analisis Konfigurasi Folder [program_dimas](file:///home/fathir/eksbot2/program_dimas)**:
+     - Motor Driver: `ENA_PIN 4`, `IN1_PIN 16`, `IN2_PIN 17`, `ENB_PIN 19`, `IN3_PIN 21`, `IN4_PIN 18`.
+     - Servo: `SERVO_GRIPPER_PIN 7`, `SERVO_LIFT_PIN 3`.
+     - Wi-Fi & UDP: SSID `dimas_asoy_geboy`, Password `12345678`, Port UDP `8888`.
+     - Kinematika: `WHEEL_BASE = 0.26` (26 cm), `MAX_SPEED = 0.50` m/s.
+  2. **Pembaruan [firmware_esp32_control.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_control/firmware_esp32_control.ino)**:
+     - Mengubah pin motor dan servo tepat sesuai `program_dimas` (Motor: 4, 16, 17, 19, 21, 18; Servo: 7 & 3).
+     - Mengubah `WHEEL_BASE` menjadi 0.26 meter.
+     - Menambahkan modul Wi-Fi UDP nirkabel (`WiFi.h`, `WiFiUdp.h`, `ArduinoJson.h`) dengan SSID `dimas_asoy_geboy` dan port `8888`.
+     - Mengimplementasikan koneksi nirkabel otomatis (Station mode ke ESP32-CAM dengan Static IP `192.168.4.2`) dan fallback otomatis ke SoftAP jika ESP32-CAM tidak dinyalakan (untuk standalone testing).
+     - Menerima paket JSON kontrol `{"lin", "ang", "grip", "lift"}` via Wi-Fi UDP nirkabel.
+     - Menjaga penerima kabel `Serial2` sebagai cadangan (dual-link).
+     - Mengirimkan telemetri voltase baterai nirkabel via UDP ke ESP32-CAM (`192.168.4.1`) tiap 1 detik.
+  3. **Pembaruan [firmware_esp32_cam.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_cam/firmware_esp32_cam.ino)**:
+     - Fungsi `forwardToControl()` kini meneruskan perintah secara nirkabel via Wi-Fi UDP ke IP static ESP32-Control (`192.168.4.2:8888`), di samping tetap mengirim lewat `Serial2` sebagai backup.
+     - Menerima paket telemetri baterai nirkabel dari ESP32-Control via UDP port 8888 dan menyampaikannya ke Laptop.
+  4. **Pembaruan Script Robot Laptop ([robot_api.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/robot_api.py))**:
+     - `self.wheel_base` disesuaikan menjadi `0.260` meter (26 cm) sesuai `program_dimas` dan URDF.
+  5. **Validasi Kompilasi**:
+     - `arduino-cli compile --fqbn esp32:esp32:esp32 .../firmware_esp32_control/` -> **SUKSES (0 error)**.
+     - `arduino-cli compile --fqbn esp32:esp32:esp32wrover .../firmware_esp32_cam/` -> **SUKSES (0 error)**.
+     - Syntax check Python `robot_api.py` dan `main.py` -> **SUKSES (0 error)**.
+
+---
+
+### Progres 5 (2026-10-28): Standardisasi IP 192.168.4.10:80, Diagnosa Program Dimas vs Eksbot2, & OTA Multi-Board
+- **User Prompt**:
+  "esp ip yang benar 192.168.4.10 port 80, cek semua koneksi pastikan sudah benar, kenapa program dimas bener sementara programku eror, serta buat agar ota dapat memilih esp mana yang mau di uplpad update"
+- **Analisis & Temuan**:
+  1. **Mengapa Program Dimas Berhasil Sementara Program Eksbot2 Error**:
+     - **Arsitektur Single vs Dual Board**: Program Dimas (`program_dimas/robot.ino`) didesain untuk **1 board ESP32 saja** (hanya pengendali motor & servo, tanpa kamera). ESP32 Dimas menjadi AP di `192.168.4.1` dan langsung menerima UDP di `192.168.4.1:8888`.
+     - **IP Mismatch di Laptop**: Pada program Eksbot2 terdapat **2 board** (ESP32-CAM di `192.168.4.10` dan ESP32-Control di `192.168.4.1`). Di `main.py` argumen default `--esp-ip` sebelumnya masih mengarah ke `192.168.4.1` (ESP32 Control). Akibatnya `main.py` mencoba mengambil stream MJPEG dari `http://192.168.4.1/stream` (port 80) yang tidak memiliki server kamera, menyebabkan stream error / timeout.
+     - **Mekanisme Failsafe Eksbot2 vs Dimas**: Program Dimas **tidak memiliki failsafe STOP** (motor jalan terus selamanya). Sedangkan program Eksbot2 memiliki failsafe 500ms dan safety stop di `main.py`. Begitu stream kamera gagal dibuka di `main.py`, loop otomatis mengirim perintah `STOP/idle`, sehingga robot tidak bergerak.
+     - **Bug IP Telemetri Baterai**: Pada `firmware_esp32_control.ino`, telemetri UDP baterai sebelumnya dikirim ke `192.168.4.1` (dirinya sendiri), bukan ke ESP32-CAM (`192.168.4.10`) atau broadcast (`192.168.4.255`).
+  2. **Perbaikan & Standarisasi Koneksi**:
+     - `main.py`: Default `--esp-ip` distandarkan ke `"192.168.4.10"`.
+     - `vision.py`: Default `esp_ip` distandarkan ke `"192.168.4.10"`.
+     - `robot_api.py`: Default `esp_ip="192.168.4.10"` (meneruskan perintah ke ESP32-CAM yang mem-bridge ke ESP32-Control).
+     - `hmi/server.py`: Mengarah ke `192.168.4.10:80` dan menyediakan endpoint REST `/api/ota_info`.
+     - `firmware_esp32_control.ino`: Menambahkan HTTP Web Server Port 80 untuk OTA Firmware Update (`http://192.168.4.1/update`) & Dashboard status (`http://192.168.4.1/`). Telemetri baterai dikirim ke `192.168.4.10` dan broadcast `192.168.4.255`.
+     - `firmware_esp32_cam.ino`: Memperbarui filter loopback (`WiFi.localIP()`) dan menyematkan target switcher di halaman web OTA (`/update`).
+  3. **Fitur Pemilihan Target OTA (Multi-Board Flash)**:
+     - Di Web Console HMI (`index.html`), card **Developer & Servis** kini memiliki pemilih target:
+       * **ESP32-CAM** (`192.168.4.10:80` / `http://192.168.4.10/update`)
+       * **ESP32-Control** (`192.168.4.1:80` / `http://192.168.4.1/update`)
+     - Pengguna dapat membuka halaman OTA masing-masing board atau mengunggah biner `.bin` secara nirkabel langsung dari HMI dashboard dengan status real-time.
+  4. **Hasil Pengujian Kompilasi**:
+     - `firmware_esp32_cam.ino`: Kompilasi `esp32:esp32:esp32wrover` -> **SUKSES (0 error)**.
+     - `firmware_esp32_control.ino`: Kompilasi `esp32:esp32:esp32wrover` -> **SUKSES (0 error)**.
+
+---
+
+### Progres 6 (2026-11-02): Implementasi Continuous Arc Steering (Smooth Coupled Control) & Deadzone PWM Compensation
+- **User Prompt**:
+  "bro rekomendasikan gw metode folowing targetnya soalnya gw pake align sudt baru maju. robotnya jadi lambat bahkan kadang kekunci dan stuck gegara ga kuat torsinya #diskusi duliu"
+  "Rekomendasi 1: Continuous Arc Steering (Smooth Coupled Control) ⭐ (Paling Direkomendasikan) jelakan ini, jdi klo target gw putar tarik dll robot bakal ikut terus realtime seperti anjing yg liatin mainanya atau kamikaze drone?"
+  "integrasikan ke programku eksekusi"
+- **Analisis Akar Masalah**:
+  1. **Gesekan Statis vs Gelinding (*Static vs Rolling Friction*)**:
+     - Sistem lama menggunakan discrete phase (*Aligning dulu baru Driving*). Saat orientasi target melenceng (`|norm_x_lead| > 0.35`), linear speed di-nol-kan (`lin = 0.0`) dan hanya angular speed yang aktif.
+     - Mode putar di tempat (*spin-in-place*) membuat ban terseret/pivot terhadap permukaan lantai, menghasilkan gesekan statis yang sangat berat. Motor DC gearbox kekurangan torsi awal untuk memutar bodi dari posisi diam, menyebabkan robot mendengung dan terkunci (*stuck*).
+  2. **Deadzone PWM Rendah**:
+     - Motor DC driver L298N/BTS7960 memiliki ambang batas putar minimum. Nilai PWM < 60 sering kali tidak mampu memutar roda, memperparah fenomena macet.
+- **Solusi & Integrasi yang Diterapkan**:
+  1. **Continuous Arc Steering di `catkin_ws/src/eksbot_simulation/scripts/robot_api.py`**:
+     - Menghapus pemisahan diskrit kaku `ALIGNING -> DRIVING`.
+     - Menggantinya dengan **Smooth Coupled Control**: Linear velocity ($v$) dan Angular velocity ($\omega$) dihitung bersamaan tiap frame.
+     - **Curvature Modulation**:
+       $$v = \text{clip}(v_{base} \times \max(0.40, 1.0 - 0.60 \times |e_x|), 0.10, MAX\_LINEAR)$$
+       $$\omega = \text{clip}(2.2 \times e_x, -2.0, 2.0)$$
+     - Nilai $v$ tidak pernah di-nol-kan selama tracking aktif (minimal 0.10 m/s). Karena kedua roda terus menggelinding (*rolling*), torsi motor tetap terjaga dan robot meluncur membentuk kurva mulus mengikuti target secara dinamis (*real-time visual pursuit* seperti missile navigation/anjing mengejar bola).
+     - Phase HUD distandarkan: `FOLLOWING` (pelacakan aktif), `INTAKE` (mendekati sela capit), `PICKUP` (siklus jepit & angkat), dan `SEARCHING` (sweeping pelan jika target hilang sementara dengan dorongan linier $0.06$ m/s agar tidak stall).
+  2. **Kompensasi Deadzone PWM di Firmware**:
+     - Diperbarui pada `catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_control/firmware_esp32_control.ino` dan `program_dimas/robot.ino`.
+     - Ditambahkan pemetaan `MIN_PWM = 60` pada `applyMotorControl()`: jika ada sinyal gerak ($pwm > 0$), nilai dipetakan dari interval $[1 \dots 255]$ ke $[60 \dots 255]$ sehingga motor langsung mendapat torsi awal yang cukup tanpa dengung.
+- **Hasil Pengujian**:
+  - `arduino-cli compile --fqbn esp32:esp32:esp32 .../firmware_esp32_control/` -> **SUKSES 100% (0 error, Flash 74%, RAM 14%)**.
+  - Simulasi Python Unit-Behavior Test:
+    * Target jauh di tengah: `FOLLOWING` (lin: 0.305, ang: 0.0) -> Lolos.
+    * Target geser tajam kanan: `FOLLOWING` (lin: 0.183, ang: 1.32) -> Lolos, lin tetap positif!
+    * Target masuk area mulut: `INTAKE` (lin: 0.14, ang: 0.06) -> Lolos.
+    * Target tenggelam: `PICKUP` (lin: 0.0, ang: 0.0) -> Lolos.
+
 ---
 
 ## 🗺️ Peta File Utama Dalam Workspace
