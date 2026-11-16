@@ -60,10 +60,12 @@ Proyek ini dirancang untuk menyelesaikan tantangan **AutoStack Challenge**, di m
    - `vision.py`: Modul OpenCV pengolahan citra RGB (Red, Green, Blue) dengan *Color Switcher* (Tombol `1`: Red, `2`: Green, `3`: Blue).
    - `robot_api.py`: Modul antarmuka pengiriman perintah gerak & servo ke ROS (`/cmd_vel`) atau Wi-Fi UDP Socket.
    - `main.py`: Aplikasi utama dengan dukungan **Kontrol Manual Keyboard (WSAD, Gripper J/K, Lift U/I)** serta **Mode Vision Auto Navigasi**.
-2. **ESP32-CAM / ESP32-WROVER (Streamer Kamera & Vision Bridge)**:
-   - `firmware_esp32_cam.ino`: Terhubung ke AP `dimas_asoy_geboy` dengan Static IP `192.168.4.10` (Fallback SoftAP `192.168.4.10`). Melayani **MJPEG Video Stream** di `http://192.168.4.10/stream` (Port 80), **OTA Web Update** di `http://192.168.4.10/update`, dan meneruskan paket kontrol UDP port `8888` ke ESP32 Sistem Kontrol (`192.168.4.1:8888`) serta via **Kabel Serial UART2** (backup).
-3. **ESP32 Sistem Kontrol (Aktuator Motor & Servo)**:
-   - `firmware_esp32_control.ino`: Memancarkan Wi-Fi SoftAP `dimas_asoy_geboy` (Pass: `12345678`, IP: `192.168.4.1`). Melayani **OTA Web Update** di `http://192.168.4.1/update` (Port 80), mendengarkan kontrol UDP di port `8888`. Konfigurasi pin disesuaikan 100% dengan `program_dimas`: Motor Driver (ENA: 4, IN1: 16, IN2: 17, ENB: 19, IN3: 21, IN4: 18) dan Servo (Gripper: 7, Lift: 3). Failsafe STOP 500 ms dan telemetri baterai via ADC GPIO34.
+2. **ESP32-CAM / ESP32-WROVER (Hotspot Wi-Fi Utama & Streamer Kamera)**:
+   - `firmware_esp32_cam.ino`: Memancarkan Wi-Fi SoftAP utama `dimas-cam` (Pass: `12345678`, IP: `192.168.4.1`). Melayani **MJPEG Video Stream** di `http://192.168.4.1/stream` (Port 80) dan **OTA Web Update** di `http://192.168.4.1/update` (Port 80; HMI otomatis mem-pause stream saat OTA CAM).
+3. **ESP32 Sistem Kontrol (Station Wi-Fi + AP Mandiri, Aktuator Motor & Sub-Kontroler Nano)**:
+   - `firmware_esp32_control.ino`: Menyambung sebagai Station ke `dimas-cam` dengan Static IP `192.168.4.10` (auto-reconnect di `loop()`) sekaligus memancarkan SoftAP mandiri `dimas-control` di `192.168.5.1` untuk akses/OTA darurat. Melayani **OTA Web Update** di `http://192.168.4.10/update` (Port 80), mendengarkan kontrol UDP langsung dari laptop di port `8888`. Pin Motor Driver: ENA: 4, IN1: 16, IN2: 17, ENB: 21, IN3: 19, IN4: 18. Meneruskan instruksi servo kamera, lifter, dan gripper ke Arduino Nano via Serial2 (TX2: 22, RX2: 23). Failsafe STOP 500 ms dan telemetri baterai via ADC GPIO34.
+4. **Arduino Nano (Sub-Kontroler Servo/Stepper Aktuator)**:
+   - `firmware_nano_actuator.ino`: Menerima perintah serial `ACT:cam,lift,grip\n` dari ESP32 Control pada Pin D0/D1 @ 115200 baud untuk mengendalikan Servo Kamera (D9), Lifter Servo (D10) / Stepper (D5, D6, D7), dan Servo Gripper (D11).
 
 ---
 
@@ -166,17 +168,15 @@ source setup_env.sh
 ### B. Menjalankan Pada Robot Fisik (ESP32-CAM & ESP32 Sistem Kontrol)
 
 1. **Flash Firmware ESP32-WROVER/CAM**:
-   - Buka `catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_cam/firmware_esp32_cam.ino` di Arduino IDE.
+   - Buka `catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_cam/firmware_esp32_cam.ino` di Arduino IDE (atau jalankan `python3 flash_ota.py cam --usb`).
    - Board: **ESP32 Wrover Module** (PSRAM aktif). Model kamera default `WROVER_KIT`.
-   - ESP32-CAM terhubung ke Wi-Fi AP `dimas_asoy_geboy` dengan Static IP `192.168.4.10`.
-   - Melayani MJPEG Stream di `http://192.168.4.10/stream` (Port 80) & OTA Update di `http://192.168.4.10/update`.
+   - ESP32-CAM memancarkan Wi-Fi SoftAP utama `dimas_asoy_geboy` (Pass: `12345678`, IP: `192.168.4.1`).
+   - Melayani MJPEG Stream di `http://192.168.4.1/stream` (Port 80) & OTA Update di `http://192.168.4.1/update` (Port 80; HMI otomatis mem-pause stream saat OTA ke CAM).
 
-2. **Flash Firmware ESP32 Sistem Kontrol**:
-   - Buka `catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_control/firmware_esp32_control.ino` di Arduino IDE.
-   - Board: **ESP32 Dev Module**.
-   - ESP32 Sistem Kontrol memancarkan Wi-Fi Access Point `dimas_asoy_geboy` (Pass: `12345678`, IP: `192.168.4.1`).
-   - Melayani OTA Update di `http://192.168.4.1/update` (Port 80) & UDP Control listener di Port `8888`.
-   - (Opsional) Kabel Hardware Serial UART2 dapat dipasang sebagai cadangan/dual-link (CAM GPIO33 -> Control GPIO27, CAM GPIO32 -> Control GPIO26, GND <-> GND).
+2. **Flash Firmware ESP32 Sistem Kontrol & Arduino Nano**:
+   - **ESP32 Sistem Kontrol**: Buka `catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_control/firmware_esp32_control.ino` (Board: **ESP32 Dev Module**, atau jalankan `python3 flash_ota.py control --usb` via USB saat setup awal / `python3 flash_ota.py control` via OTA setelah terhubung Wi-Fi).
+   - ESP32 Sistem Kontrol terhubung ke Wi-Fi AP `dimas_asoy_geboy` dengan Static IP `192.168.4.10`, melayani OTA Update di `http://192.168.4.10/update` (Port 80) & UDP Control listener langsung di Port `8888`.
+   - **Arduino Nano Aktuator**: Upload `firmware_nano_actuator.ino` (atau jalankan `python3 flash_ota.py nano`), lalu sambungkan ESP32 GPIO22 (TX2) -> Nano D0 (RX), GPIO23 (RX2) <- Nano D1 (TX), dan GND <-> GND.
 
 3. **Jalankan Aplikasi Web HMI di Laptop**:
    - Hubungkan Wi-Fi Laptop ke access point `dimas_asoy_geboy` (Pass: `12345678`).
@@ -190,10 +190,10 @@ source setup_env.sh
      - **Tema Flat**: Tema Terang (Background Putih) & Tema Gelap (Background Hitam), tombol warna soft.
      - **Animasi Tombol Responsif**: Tombol WSAD dan tombol aksi menyala/berkedip (`pulse` & `held`) dengan halus saat ditekan via keyboard/klik.
      - **Audio Feedback / Sound Cues**: Sintesis Web Audio API (suara radar chirp saat lock target, suara descending saat target lepas, alarm darurat E-STOP, chime down saat Wi-Fi putus). Toggle via tombol `[P]`.
-     - **Flight Data Recorder (Blackbox Telemetry)**: Tombol `● REC [O]` untuk merekam video HUD `.webm` dan menyimpan log telemetri per 100ms ke `.csv` (auto-download saat dihentikan).
+     - **Flight Data Recorder (Blackbox Telemetry)**: Tombol `● REC [O]` untuk merekam video HUD `.mp4` dan menyimpan log telemetri per 100ms ke `.csv` (auto-download saat dihentikan).
      - **HSV Tuner Live di Web**: Slider pengaturan `H_min, H_max, S_min, S_max, V_min, V_max` interaktif untuk kalibrasi pencahayaan ruangan tanpa restart program.
-     - **Telemetri Baterai Real-Time**: Pill header `🔋 12.0V · 95%` dan meter baterai di HUD dari pembacaan ADC ESP32.
-     - **OTA Multi-Board Firmware Update**: Panel di HMI untuk memilih target board (ESP32-CAM di `192.168.4.10:80` atau ESP32-Control di `192.168.4.1:80`), membuka halaman web flash, atau upload biner `.bin` nirkabel langsung dari browser.
+     - **Telemetri Baterai Real-Time**: Pill header `BATT 12.0V · 95%` dan meter baterai di HUD dari pembacaan ADC ESP32.
+     - **1-Klik Compile `.ino` & OTA Multi-Board Update**: Panel di HMI untuk memilih target board (ESP32-CAM di `192.168.4.1:80` atau ESP32-Control di `192.168.4.10:80`), langsung mengompilasi `.ino` dan flash nirkabel via `flash_ota.py` (stream otomatis di-pause saat OTA CAM), membuka web flash, atau upload manual file `.bin`.
      - **Crosshair Tuner**: Dapat diatur (ukuran, celah, ketebalan, warna, dan offset X/Y) atau digeser via `Shift` + Panah Keyboard.
      - **Popup Legenda Tombol**: Tekan tombol `H` atau klik tombol "Legenda" di navbar atas.
      - **Opsi GUI OpenCV Lama**: Jalankan `python3 main.py --gui` jika ingin jendela OpenCV pop-up tetap aktif bersamaan.

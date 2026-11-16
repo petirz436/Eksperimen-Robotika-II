@@ -113,6 +113,8 @@ class ESPCamReader:
         self.stream = None
         self._opened = False
         self._running = True
+        self._paused = False
+        self._pause_until = 0.0
         self._lock = threading.Lock()
         self._latest_jpg = None
         self._seq = 0
@@ -145,9 +147,29 @@ class ESPCamReader:
         self.stream = None
         self._opened = False
 
+    def set_paused(self, paused, duration=None):
+        """Pause/resume koneksi MJPEG sementara (mis. agar port 80 ESP32-CAM bebas untuk OTA)."""
+        self._paused = bool(paused)
+        self._pause_until = (time.time() + float(duration)) if (paused and duration) else 0.0
+        if self._paused:
+            self._close_stream()
+            print("[CAM_READER] Stream di-pause sementara untuk OTA...")
+        else:
+            print("[CAM_READER] Stream dilanjutkan kembali.")
+
     def _reader_loop(self):
         buf = bytearray()
         while self._running:
+            if self._paused:
+                if self._pause_until > 0.0 and time.time() >= self._pause_until:
+                    self._paused = False
+                    self._pause_until = 0.0
+                    print("[CAM_READER] Pause OTA selesai, menyambung ulang stream...")
+                else:
+                    if self.stream is not None:
+                        self._close_stream()
+                    time.sleep(0.1)
+                    continue
             if self.stream is None:
                 self._connect()
                 buf = bytearray()
@@ -191,7 +213,7 @@ class ESPCamReader:
         self._close_stream()
 
 
-def open_source(kind, esp_ip="192.168.4.10", esp_url=None, ros_topic="/camera/image_raw", webcam_index=0):
+def open_source(kind, esp_ip="192.168.4.1", esp_url=None, ros_topic="/camera/image_raw", webcam_index=0):
     """Factory pembuat objek sumber kamera: kind in {'esp', 'sim', 'webcam'}."""
     if kind == "esp":
         return ESPCamReader(esp_url or f"http://{esp_ip}/stream")

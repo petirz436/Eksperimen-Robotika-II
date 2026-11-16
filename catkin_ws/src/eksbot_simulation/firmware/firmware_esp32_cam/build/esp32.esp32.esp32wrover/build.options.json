@@ -1,10 +1,9 @@
 {
   "additionalFiles": "",
-  "builtInLibrariesFolders": "/home/fathir/.arduino15/libraries",
   "compiler.optimization_flags": "-Os",
   "customBuildProperties": "",
-  "fqbn": "esp32:esp32:esp32wrover:UploadSpeed=115200,FlashFreq=80,FlashMode=qio,PartitionScheme=default,DebugLevel=none,EraseFlash=none",
+  "fqbn": "esp32:esp32:esp32wrover",
   "hardwareFolders": "/home/fathir/.arduino15/packages/esp32/hardware/esp32/3.3.11,/home/fathir/.arduino15/packages/esp32/hardware/esp32/3.3.11",
-  "otherLibrariesFolders": "/home/fathir/Arduino/libraries",
+  "otherLibrariesFolders": "/home/fathir/.arduino15/libraries,/home/fathir/Arduino/libraries",
   "sketchLocation": "/home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_cam"
 }

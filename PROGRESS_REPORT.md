@@ -382,6 +382,79 @@ File ini merupakan **Laporan Progres & Histori Log Utama** yang WAJIB dibaca dan
 
 ---
 
+### Progres 7 (2026-11-11): Integrasi Arduino Nano Sub-Kontroler Aktuator, Servo Kamera, Lifter, & Remap Serial2
+- **User Prompt**:
+  "tx rx dah ku ubah ke 23 22. jadi tx rx di hubungkan ke ardunio nano untuk kontrol servo. nantinya servo kamera, steper lifter, dan srvo griper disana. sekarang baru ada servo kamera dan lifter. sesuaikan code dan generate firmware arduino aktuator"
+- **Tindakan & Progress**:
+  1. **Pembuatan Firmware Sub-Kontroler Arduino Nano ([firmware_nano_actuator.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/firmware/firmware_nano_actuator/firmware_nano_actuator.ino))**:
+     - Firmware mandiri untuk Arduino Nano (ATmega328P) yang mendengarkan Hardware Serial (RX Pin D0, TX Pin D1) @ 115200 baud.
+     - Mengendalikan:
+       * **Servo Kamera (Tilt/Pan)** di Pin `D9` (Sudut: 0 - 180°, default 90° netral).
+       * **Servo Lifter** di Pin `D10` (Sudut: 0 - 180°, default 0° turun).
+       * **Servo Gripper** di Pin `D11` (Sudut: 0 - 180°, default 0° buka).
+       * **Opsi Stepper Lifter**: Dilengkapi opsi `#define LIFTER_USE_STEPPER 1` dengan pin STEP `D5`, DIR `D6`, EN `D7`.
+     - Protokol string ASCII ringkas: `ACT:<cam>,<lift>,<grip>\n` dengan respon `ACK:OK` dan dukungan `PING`/`PONG`.
+     - Validasi kompilasi: `arduino-cli compile --fqbn arduino:avr:nano` -> **SUKSES 100% (Flash 17%, RAM 16%)**.
+  2. **Pembaruan Firmware ESP32 Control ([firmware_esp32_control.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_control/firmware_esp32_control.ino))**:
+     - Memperbarui `RX2_PIN 23` dan `TX2_PIN 22` sebagai jalur transmisi Serial UART2 ke Arduino Nano.
+     - Melepaskan beban Servo dari pin ESP32 (menghilangkan bentrok pin dan *power drop* di ESP32).
+     - Menambahkan parameter `cam` pada parser UDP JSON dan meneruskan instruksi aktuator ke Nano via `Serial2.printf("ACT:%d,%d,%d\n", currentCam, currentLift, currentGrip)`.
+     - Validasi kompilasi: `arduino-cli compile --fqbn esp32:esp32:esp32` -> **SUKSES 100% (Flash 74%, RAM 14%)**.
+  3. **Pembaruan API Robot & Navigasi Laptop ([robot_api.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/robot_api.py))**:
+     - Menambahkan state `self.current_camera = 90` dan method `set_camera(angle)`.
+     - Menambahkan payload `"cam": self.current_camera` pada pengiriman paket UDP.
+     - Menambahkan handler aksi `cam`, `cam_up`, `cam_down` di Controller dan mengeksposnya ke telemetri HUD.
+  4. **Pembaruan Web HMI Pilot Console ([index.html](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/hmi/index.html))**:
+     - Menambahkan tombol kontrol Tilt Kamera di card Aktuator: **Kamera Atas [Q]** dan **Kamera Bawah [E]**.
+     - Menambahkan status sudut kamera pada tabel telemetri HUD.
+
+### Progres 8 (2026-11-11): Analisis & Perbaikan Kritis Wi-Fi Station ESP32-Control, Port 80 OTA, dan Bug Error 1-Klik HMI
+- **User Prompt**:
+  "`❌ Gagal compile/flash: Periksa koneksi Wi-Fi` ... `dimas asoy geboy dah muncul kamera dah muncul kenapa disitu wifi ga ada dan saat buka halaman kontrol selalu gabisa ANALISIS` ... `woy pake port 80 jangan 81 MALAH GABISA KONEK WOY`"
+- **Analisis Akar Masalah**:
+  1. **Bug Crash `NameError` + Error-Masking di Web HMI**:
+     - `catkin_ws/src/eksbot_simulation/scripts/hmi/server.py` memanggil `sys.executable` pada endpoint `/api/flash_ota` tanpa `import sys`, memicu HTTP 500 `NameError` setiap tombol 1-Klik ditekan.
+     - Helper `post()` di `hmi/index.html` membuang isi JSON saat status bukan 2xx (`!res.ok`), sehingga UI selalu menampilkan pesan palsu `"Periksa koneksi Wi-Fi"` meskipun penyebabnya adalah Python exception atau target IP belum aktif.
+  2. **Bug `fallback_url` Berbahaya di `flash_ota.py`**:
+     - Target `control` memiliki `"fallback_url": "http://192.168.4.1/update"` — jika `192.168.4.10` timeout, script berisiko menimpa **ESP32-CAM (`192.168.4.1`)** dengan firmware control. Selain itu kegagalan upload tidak mengembalikan exit code `1`.
+  3. **Race Condition Boot & Duplikasi SSID di `firmware_esp32_control.ino`**:
+     - `setup()` hanya menunggu ESP32-CAM selama 4 detik lalu langsung fallback permanen ke `WIFI_AP` dengan SSID identik `dimas_asoy_geboy` tanpa logika reconnect di `loop()`. Akibatnya Control terisolasi di jaringan AP terpisah dan tidak pernah mendapat IP `192.168.4.10` di jaringan ESP-CAM, serta link HTML & target UDP baterai masih tertukar (`192.168.4.1` vs `192.168.4.10`).
+  4. **Link OTA Port 80 vs 81**:
+     - Link OTA dikonsolidasikan kembali murni pada **Port 80 standar** (`http://192.168.4.1/update` dan `http://192.168.4.10/update`), dengan ketentuan menghentikan `main.py` (Ctrl+C) sebelum melakukan OTA ke ESP32-CAM agar `/stream` tidak menahan socket port 80.
+- **Solusi & Perbaikan**:
+  1. **[hmi/server.py](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/hmi/server.py) & [hmi/index.html](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/scripts/hmi/index.html)**: Menambahkan `import sys` & `import subprocess`, mengekstrak ringkasan error aktual dari output compiler/uploader, dan memperbaiki fungsi `post()` agar mengembalikan pesan error asli dari server ke UI.
+  2. **[flash_ota.py](file:///home/fathir/eksbot2/flash_ota.py)**: Menghapus `fallback_url` berbahaya pada `control`, menggunakan Port 80 standar untuk `control` (`192.168.4.10/update`) & `cam` (`192.168.4.1/update`), menambahkan opsi `--usb` untuk flash kabel satu perintah, pre-check TCP cepat (`3s`), bypass proxy lokal (`ProxyHandler({})`), dan exit code `1` yang akurat saat gagal.
+  3. **[firmware_esp32_control.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_control/firmware_esp32_control.ino)**: Membersihkan sisa definisi servo lama (GPIO 7/3), menambahkan header CORS (`/update`), dan memantapkan kontrol aktuator via Serial2 Nano (RX2=23, TX2=22).
+  4. **[firmware_esp32_cam.ino](file:///home/fathir/eksbot2/catkin_ws/src/eksbot_simulation/firmware/firmware_esp32_cam/firmware_esp32_cam.ino)**: Mengembalikan layanan HTTP murni pada Port `80` (`/stream`, `/update` GET/POST/OPTIONS) dan menambahkan CORS header.
+
+### Progres 9: Pemulihan Topologi Wi-Fi & IP Asli (`Control = 192.168.4.1` SoftAP, `CAM = 192.168.4.10` STA)
+- **Permasalahan User**:
+  - Setelah OTA, `main.py` gagal mengambil kamera dengan error `HTTP Error 404: Not Found` pada `http://192.168.4.1/stream` karena pembalikan IP sementara membuat Control dan CAM bertukar alamat sementara `192.168.4.1` adalah SoftAP Control yang tidak melayani `/stream`. User menginstruksikan mempertahankan arsitektur koneksi Wi-Fi & kamera asli tanpa diubah.
+- **Perbaikan yang Diterapkan**:
+  1. **Pemulihan Role & IP Asli (Port 80 Murni)**:
+     - **ESP32-Control (`firmware_esp32_control.ino`)**: Dikembalikan menjadi SoftAP utama `dimas_asoy_geboy` pada **`192.168.4.1`** (`WIFI_AP`, UDP `8888`, OTA `/update` Port 80, telemetri baterai dikirim ke `192.168.4.10` dan broadcast `192.168.4.255`), tanpa guard `WiFi.status() == WL_CONNECTED` yang tidak berlaku pada mode AP, serta mempertahankan integrasi Arduino Nano (`RX2=23`, `TX2=22`) dan parameter servo kamera `cam`.
+     - **ESP32-CAM (`firmware_esp32_cam.ino`)**: Dikembalikan menjadi Station ke `dimas_asoy_geboy` dengan IP statis **`192.168.4.10`** (gateway `192.168.4.1`, fallback SoftAP `192.168.4.10`), `/stream` & `/update` di Port 80, dan bridge UDP ke `192.168.4.1:8888`.
+  2. **Sinkronisasi Laptop Runtime, HMI & OTA CLI**:
+     - `main.py`, `vision.py`, dan `robot_api.py` dikembalikan ke default `--esp-ip = 192.168.4.10`.
+     - `flash_ota.py`, `hmi/server.py`, dan `hmi/index.html` disinkronkan (`control` -> `http://192.168.4.1/update`, `cam` -> `http://192.168.4.10/update`), tetap menjaga perbaikan `import sys`/`subprocess`, JSON error reporting di `post()`, pre-check TCP, proxy bypass, dan proteksi tanpa cross-board fallback.
+
+### Progres 10 (2026-11-16): Pembalikan Topologi Wi-Fi ke ESP32-CAM (`192.168.4.1`), Kontrol UDP Langsung ke Control (`192.168.4.10`), & Auto-Pause Stream OTA
+- **Permasalahan User**:
+  - Sejak Wi-Fi AP dipindah ke ESP32-Control, web OTA Control bisa dibuka tetapi web OTA ESP32-CAM tidak bisa diakses, kamera gagal terhubung (`No route to host` ke `192.168.4.10/stream`), dan robot lumpuh total karena kontrol UDP ikut lewat bridge ESP32-CAM.
+- **Perbaikan yang Diterapkan**:
+  1. **Pembalikan Topologi Wi-Fi (AP di ESP32-CAM)**:
+     - `firmware_esp32_cam.ino`: Menjadi SoftAP utama `dimas_asoy_geboy` di **`192.168.4.1`** (Port 80 untuk `/stream` & `/update`).
+     - `firmware_esp32_control.ino`: Menjadi Station (`WIFI_STA`) ke `dimas_asoy_geboy` dengan Static IP **`192.168.4.10`** + auto-reconnect di `loop()` tiap 5 detik (menghapus fallback SoftAP SSID kembar), melayani OTA di `http://192.168.4.10/update` dan UDP `8888`.
+  2. **Kontrol UDP Langsung ke ESP32-Control (Anti-Lumpuh)**:
+     - `main.py` & `robot_api.py`: Menambahkan `--control-ip` (default `192.168.4.10`) terpisah dari `--esp-ip` kamera (`192.168.4.1`). Mode `MANUAL` di `idle()` tetap memproses input WSAD dan mengirim UDP meskipun kamera putus/di-pause.
+     - `firmware_esp32_control.ino`: Mengirim telemetri baterai langsung ke IP/port pengirim UDP laptop terakhir (`lastClientIP:lastClientPort`) serta ke `192.168.4.1` dan broadcast.
+  3. **Auto-Pause Stream saat OTA ESP32-CAM**:
+     - `vision.py`: Menambahkan `ESPCamReader.set_paused(paused, duration=None)` untuk melepas koneksi `/stream` port 80 sementara.
+     - `hmi/server.py` & `hmi/index.html`: Menambahkan endpoint `POST /api/stream_pause` dan auto-pause otomatis saat 1-Klik Flash OTA, upload `.bin` manual, atau membuka halaman Web Flash ESP32-CAM.
+     - `flash_ota.py`: Disinkronkan (`cam` -> `http://192.168.4.1/update`, `control` -> `http://192.168.4.10/update`).
+
+---
+
 ## 🗺️ Peta File Utama Dalam Workspace
 
 ```

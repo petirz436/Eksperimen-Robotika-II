@@ -5,10 +5,10 @@
  * & tidak freeze di board WROVER yang sama), lalu ditambah bridge kontrol robot.
  *
  * Fitur:
- * 1. Wi-Fi SoftAP: SSID "dimas_asoy_geboy", Password "12345678" (IP: 192.168.4.1).
- * 2. HTTP MJPEG stream di http://192.168.4.1/stream (port 80, dipakai main.py).
- * 3. UDP listener port 8888: menerima JSON {"lin","ang","grip","lift"} dari Laptop.
- * 4. Meneruskan data kontrol ke ESP32 Sistem Kontrol lewat kabel UART (Serial2).
+ * 1. Wi-Fi SoftAP Utama: SSID "dimas_asoy_geboy", Password "12345678" (IP: 192.168.4.1).
+ * 2. HTTP MJPEG stream di http://192.168.4.1/stream & OTA di http://192.168.4.1/update (port 80).
+ * 3. UDP listener port 8888: menerima JSON {"lin","ang","grip","lift","cam"} (opsional bridge ke 192.168.4.10).
+ * 4. Meneruskan data kontrol ke ESP32 Sistem Kontrol lewat kabel UART (Serial2) & UDP cadangan.
  * 5. Failsafe: jika Laptop berhenti mengirim data > 500 ms, robot dikirimi perintah STOP.
  *
  * WIRING UART (WROVER Kit):
@@ -96,7 +96,7 @@
 #define CAM_HMIRROR_OV3660  0
 
 // CONFIG WI-FI SOFTAP & UDP
-const char* AP_SSID = "dimas_asoy_geboy";
+const char* AP_SSID = "dimas-cam";
 const char* AP_PASS = "12345678";
 const int UDP_PORT = 8888;
 
@@ -109,7 +109,7 @@ volatile bool camera_ready = false;
 unsigned long lastCameraTry = 0;
 
 // State perintah terakhir (untuk failsafe & debug)
-int lastGrip = 0, lastLift = 0;
+int lastGrip = 0, lastLift = 0, lastCam = 90;
 unsigned long lastCmdMs = 0;
 bool failsafeSent = true;
 unsigned long lastDebugMs = 0;
@@ -190,20 +190,20 @@ static const char OTA_HTML[] =
   ".nav-bar a{color:#60a5fa;text-decoration:none;font-weight:500}"
   ".nav-bar a:hover{text-decoration:underline}"
   "</style></head><body><div class='card'>"
-  "<div class='badge'>STREAMER KAMERA &amp; BRIDGE</div>"
+  "<div class='badge'>KAMERA &amp; AP UTAMA</div>"
   "<h1>ESP32-CAM OTA Update</h1>"
-  "<p>Upload binary (.bin) untuk memperbarui firmware ESP32-CAM (IP: 192.168.4.10:80).</p>"
+  "<p>Upload binary (.bin) untuk memperbarui firmware ESP32-CAM (IP: 192.168.4.1).</p>"
   "<div class='selector-title'>Pilih Target Board ESP:</div>"
   "<div class='target-switch'>"
-  "<a class='target-btn' href='http://192.168.4.1/update'><b>ESP-Control</b><span>192.168.4.1 ↗</span></a>"
-  "<a class='target-btn active' href='#'><b>ESP-CAM</b><span>192.168.4.10 (Saat Ini)</span></a>"
+  "<a class='target-btn active' href='#'><b>ESP-CAM</b><span>192.168.4.1 (Saat Ini)</span></a>"
+  "<a class='target-btn' href='http://192.168.4.10/update'><b>ESP-Control</b><span>192.168.4.10 ↗</span></a>"
   "</div>"
   "<input type='file' id='fw' accept='.bin'>"
   "<button id='btn' onclick='startUpdate()'>Flash ESP32-CAM (.bin)</button>"
   "<div id='status'></div>"
   "<div class='nav-bar'>"
-  "<a href='http://192.168.4.10/stream' target='_blank'>← Cek Stream Kamera</a>"
-  "<a href='http://192.168.4.1/update'>OTA ESP32-Control (192.168.4.1) ↗</a>"
+  "<a href='http://192.168.4.1/stream' target='_blank'>← Cek Stream Kamera</a>"
+  "<a href='http://192.168.4.10/update'>OTA ESP32-Control (192.168.4.10) ↗</a>"
   "</div></div><script>"
   "async function startUpdate(){"
   "const f=document.getElementById('fw').files[0];"
@@ -217,12 +217,26 @@ static const char OTA_HTML[] =
   "catch(e){st.style.color='#f87171';st.textContent='Error koneksi: '+e;btn.disabled=false;}}"
   "</script></body></html>";
 
+static void set_cors_headers(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+}
+
+static esp_err_t ota_options_handler(httpd_req_t *req) {
+  set_cors_headers(req);
+  httpd_resp_set_status(req, "204 No Content");
+  return httpd_resp_send(req, NULL, 0);
+}
+
 static esp_err_t ota_get_handler(httpd_req_t *req) {
+  set_cors_headers(req);
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_sendstr(req, OTA_HTML);
 }
 
 static esp_err_t ota_post_handler(httpd_req_t *req) {
+  set_cors_headers(req);
   size_t total = req->content_len;
   if (!Update.begin(total > 0 ? total : UPDATE_SIZE_UNKNOWN)) {
     httpd_resp_send_500(req);
@@ -258,7 +272,7 @@ static esp_err_t ota_post_handler(httpd_req_t *req) {
 
 void startCameraServer() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.server_port = 80;   // Port 80 default HTTP MJPEG stream (http://<ip>/stream)
+  config.server_port = 80;   // Port 80 standar untuk Stream (/stream) & OTA (/update)
   config.lru_purge_enable = true;
   config.max_open_sockets = 4;
   config.recv_wait_timeout = 3;
@@ -282,15 +296,22 @@ void startCameraServer() {
     .handler   = ota_post_handler,
     .user_ctx  = NULL
   };
+  httpd_uri_t ota_opt_uri = {
+    .uri       = "/update",
+    .method    = HTTP_OPTIONS,
+    .handler   = ota_options_handler,
+    .user_ctx  = NULL
+  };
 
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(stream_httpd, &stream_uri);
     httpd_register_uri_handler(stream_httpd, &ota_get_uri);
     httpd_register_uri_handler(stream_httpd, &ota_post_uri);
-    Serial.println("MJPEG stream aktif di http://192.168.4.10/stream (port 80)");
-    Serial.println("OTA Update Web Page aktif di http://192.168.4.10/update");
+    httpd_register_uri_handler(stream_httpd, &ota_opt_uri);
+    Serial.println("MJPEG stream aktif di http://192.168.4.1/stream (port 80)");
+    Serial.println("OTA Update Web Page aktif di http://192.168.4.1/update (port 80)");
   } else {
-    Serial.println("Gagal memulai HTTP stream pada port 80.");
+    Serial.println("Gagal memulai HTTP server pada port 80.");
   }
 }
 
@@ -370,22 +391,22 @@ static bool jsonNumber(const char *buf, const char *key, float *out) {
   return true;
 }
 
-static void forwardToControl(float lin, float ang, int grip, int lift) {
-  // 1. Teruskan kontrol nirkabel via Wi-Fi UDP ke ESP32 Sistem Kontrol (192.168.4.1)
+static void forwardToControl(float lin, float ang, int grip, int lift, int cam = 90) {
+  // 1. Teruskan kontrol nirkabel via Wi-Fi UDP ke ESP32 Sistem Kontrol (192.168.4.10)
   char jsonBuf[128];
   int jlen = snprintf(jsonBuf, sizeof(jsonBuf),
-                      "{\"cmd\":\"move\",\"lin\":%.2f,\"ang\":%.2f,\"grip\":%d,\"lift\":%d}\n",
-                      lin, ang, grip, lift);
-  udp.beginPacket(IPAddress(192, 168, 4, 1), UDP_PORT);
+                      "{\"cmd\":\"move\",\"lin\":%.2f,\"ang\":%.2f,\"grip\":%d,\"lift\":%d,\"cam\":%d}\n",
+                      lin, ang, grip, lift, cam);
+  udp.beginPacket(IPAddress(192, 168, 4, 10), UDP_PORT);
   udp.write((const uint8_t*)jsonBuf, jlen);
   udp.endPacket();
 
   // 2. Teruskan juga lewat kabel Serial2 sebagai backup jika kabel terpasang
-  Serial2.printf("CMD:%.2f,%.2f,%d,%d\n", lin, ang, grip, lift);
+  Serial2.printf("CMD:%.2f,%.2f,%d,%d,%d\n", lin, ang, grip, lift, cam);
 
   if (millis() - lastDebugMs > 300) {   // Batasi debug print agar loop tidak melambat
     lastDebugMs = millis();
-    Serial.printf("[BRIDGE -> NIRKABEL & SERIAL2] Lin:%.2f | Ang:%.2f | Grip:%d | Lift:%d\n", lin, ang, grip, lift);
+    Serial.printf("[BRIDGE -> KONTROL] Lin:%.2f | Ang:%.2f | Cam:%d | Grip:%d | Lift:%d\n", lin, ang, cam, grip, lift);
   }
 }
 
@@ -400,33 +421,14 @@ void setup() {
   camera_ready = initCamera();
   lastCameraTry = millis();
 
-  // 2. Wi-Fi: Hubungkan ke AP dimas_asoy_geboy (ESP32-Control) dengan IP statis 192.168.4.10
-  WiFi.mode(WIFI_STA);
-  IPAddress local_IP(192, 168, 4, 10);
-  IPAddress gateway(192, 168, 4, 1);
+  // 2. Wi-Fi SoftAP Utama: Memancarkan dimas_asoy_geboy pada 192.168.4.1
+  WiFi.mode(WIFI_AP);
+  IPAddress local_IP(192, 168, 4, 1);
   IPAddress subnet(255, 255, 255, 0);
-  WiFi.config(local_IP, gateway, subnet);
-  WiFi.begin(AP_SSID, AP_PASS);
+  WiFi.softAPConfig(local_IP, local_IP, subnet);
+  WiFi.softAP(AP_SSID, AP_PASS);
   WiFi.setSleep(false);   // Matikan power-save Wi-Fi: mengurangi jitter/latensi
-
-  Serial.printf("\n[ESP32-CAM] Menyambungkan ke Wi-Fi AP '%s'...\n", AP_SSID);
-  unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 3500) {
-    delay(150);
-    Serial.print(".");
-  }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[ESP32-CAM] Terhubung ke AP! IP: %s (Stream port 80)\n", WiFi.localIP().toString().c_str());
-  } else {
-    // Fallback ke SoftAP jika ESP32-Control belum menyala
-    Serial.println("[ESP32-CAM] AP tidak ditemukan -> Menyalakan SoftAP fallback (192.168.4.10)...");
-    WiFi.mode(WIFI_AP);
-    WiFi.softAPConfig(local_IP, local_IP, subnet);
-    WiFi.softAP(AP_SSID, AP_PASS);
-    Serial.printf("[ESP32-CAM] SoftAP Aktif: %s | IP: %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
-  }
+  Serial.printf("\n[ESP32-CAM] SoftAP Utama Aktif: %s | IP: %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
 
   // 3. Server stream + UDP
   startCameraServer();
@@ -492,18 +494,19 @@ void loop() {
       continue;
     }
 
-    // Jika pengirim bukan ESP32-Control, simpan sebagai Laptop IP
-    if (remote != IPAddress(192, 168, 4, 1)) {
+    // Jika pengirim bukan ESP32-Control (192.168.4.10), simpan sebagai Laptop IP
+    if (remote != IPAddress(192, 168, 4, 10)) {
       lastLaptopIP = remote;
       lastLaptopPort = rport;
     }
 
-    float tLin, tAng, tGrip, tLift;
+    float tLin, tAng, tGrip, tLift, tCam;
     if (jsonNumber(packetBuffer, "lin", &tLin) && jsonNumber(packetBuffer, "ang", &tAng)) {
       lin = tLin;
       ang = tAng;
       if (jsonNumber(packetBuffer, "grip", &tGrip)) lastGrip = (int)tGrip;
       if (jsonNumber(packetBuffer, "lift", &tLift)) lastLift = (int)tLift;
+      if (jsonNumber(packetBuffer, "cam", &tCam))   lastCam  = (int)tCam;
       got = true;
     }
   }
@@ -517,11 +520,11 @@ void loop() {
   }
 
   if (got) {
-    forwardToControl(lin, ang, lastGrip, lastLift);
+    forwardToControl(lin, ang, lastGrip, lastLift, lastCam);
     lastCmdMs = millis();
     failsafeSent = false;
   } else if (!failsafeSent && millis() - lastCmdMs > FAILSAFE_MS) {
-    forwardToControl(0.0f, 0.0f, lastGrip, lastLift);   // Laptop diam/freeze -> robot berhenti
+    forwardToControl(0.0f, 0.0f, lastGrip, lastLift, lastCam);   // Laptop diam/freeze -> robot berhenti
     Serial.println("[FAILSAFE] Tidak ada data kontrol -> STOP");
     failsafeSent = true;
   }

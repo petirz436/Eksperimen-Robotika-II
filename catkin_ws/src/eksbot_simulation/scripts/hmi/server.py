@@ -20,6 +20,8 @@ Endpoint:
 import json
 import os
 import socket
+import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -130,8 +132,9 @@ class VideoRecorder:
 
 
 class HMIServer:
-    def __init__(self, controller, host="0.0.0.0", port=8000, max_port_tries=10):
+    def __init__(self, controller, cam=None, host="0.0.0.0", port=8000, max_port_tries=10):
         self.controller = controller
+        self.cam = cam
         self.hub = FrameHub()
         self.recorder = VideoRecorder(RECORDINGS_DIR)
         self.started = time.time()
@@ -173,9 +176,9 @@ class HMIServer:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
-                s.connect(("192.168.4.10", 80))
-            except Exception:
                 s.connect(("192.168.4.1", 80))
+            except Exception:
+                s.connect(("192.168.4.10", 80))
             ip = s.getsockname()[0]
             s.close()
             if not ip.startswith("127."):
@@ -235,20 +238,20 @@ class HMIServer:
                             {
                                 "id": "esp32_cam",
                                 "name": "ESP32-CAM",
-                                "role": "Kamera & Vision Bridge",
-                                "ip": "192.168.4.10",
+                                "role": "Kamera & AP Utama",
+                                "ip": "192.168.4.1",
                                 "port": 80,
-                                "update_url": "http://192.168.4.10/update",
-                                "stream_url": "http://192.168.4.10/stream"
+                                "update_url": "http://192.168.4.1/update",
+                                "stream_url": "http://192.168.4.1/stream"
                             },
                             {
                                 "id": "esp32_control",
                                 "name": "ESP32-Control",
-                                "role": "Sistem Motor & Servo (AP)",
-                                "ip": "192.168.4.1",
+                                "role": "Sistem Motor & Nano Aktuator",
+                                "ip": "192.168.4.10",
                                 "port": 80,
-                                "update_url": "http://192.168.4.1/update",
-                                "status_url": "http://192.168.4.1/"
+                                "update_url": "http://192.168.4.10/update",
+                                "status_url": "http://192.168.4.10/"
                             }
                         ]
                     })
@@ -377,6 +380,48 @@ class HMIServer:
                 if path == "/api/crosshair":
                     ctrl.set_crosshair(body)
                     return self._send(200, {"ok": True, "crosshair": ctrl.crosshair})
+                if path == "/api/stream_pause":
+                    paused = bool(body.get("paused", True))
+                    duration = body.get("duration")
+                    if server.cam and hasattr(server.cam, "set_paused"):
+                        server.cam.set_paused(paused, duration=duration)
+                        return self._send(200, {"ok": True, "paused": paused})
+                    return self._send(200, {"ok": False, "paused": False})
+                if path == "/api/flash_ota":
+                    target = str(body.get("target", "control")).lower()
+                    if target not in ("control", "cam", "nano"):
+                        return self._send(400, {"ok": False, "error": f"Target OTA tidak valid: {target}"})
+                    use_usb = bool(body.get("usb", False))
+                    script_path = os.path.abspath(os.path.join(WEB_DIR, "../../../../flash_ota.py"))
+                    if not os.path.isfile(script_path):
+                        script_path = "/home/fathir/eksbot2/flash_ota.py"
+                    if not os.path.isfile(script_path):
+                        return self._send(500, {"ok": False, "error": f"Script flash_ota.py tidak ditemukan di {script_path}"})
+                    cmd = [sys.executable, script_path, target]
+                    if use_usb and target != "nano":
+                        cmd.append("--usb")
+                    paused_for_cam = False
+                    if target == "cam" and not use_usb and server.cam and hasattr(server.cam, "set_paused"):
+                        server.cam.set_paused(True)
+                        paused_for_cam = True
+                        time.sleep(0.4)
+                    try:
+                        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+                        out = ((res.stdout or "") + "\n" + (res.stderr or "")).strip()
+                        err_lines = [ln.strip() for ln in out.splitlines() if "❌" in ln or "Error" in ln or "GAGAL" in ln]
+                        err_summary = " | ".join(err_lines[-3:]) if err_lines else (out[-240:] if res.returncode != 0 else "")
+                        return self._send(200 if res.returncode == 0 else 500, {
+                            "ok": res.returncode == 0,
+                            "error": err_summary if res.returncode != 0 else "",
+                            "output": out
+                        })
+                    except subprocess.TimeoutExpired:
+                        return self._send(504, {"ok": False, "error": "Timeout compile/upload (>120 detik)."})
+                    except Exception as e:
+                        return self._send(500, {"ok": False, "error": str(e)})
+                    finally:
+                        if paused_for_cam:
+                            server.cam.set_paused(False)
                 if path == "/api/hsv":
                     if not hasattr(ctrl, "vision") or not ctrl.vision:
                         return self._send(400, {"ok": False})

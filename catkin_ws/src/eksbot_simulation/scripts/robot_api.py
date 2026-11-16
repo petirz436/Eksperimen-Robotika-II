@@ -43,7 +43,7 @@ MOVE_KEYS = {
 }
 
 KEY_TIMEOUT = 0.8         # detik: tombol "ditahan" dianggap lepas jika heartbeat berhenti
-MAX_LINEAR = 0.60         # m/s, sama dengan MAX_SPEED di firmware kontrol
+MAX_LINEAR = 0.50         # m/s, sama dengan MAX_SPEED di firmware kontrol
 BASE_LINEAR = 0.40        # m/s kecepatan maju mundur dasar (ditingkatkan dari 0.30)
 BASE_ANGULAR = 0.80        # rad/s kecepatan belok dasar (ditingkatkan dari 1.2 agar bertenaga saat spot-turn)
 REF_AREA = 320 * 240      # resolusi acuan ambang area (QVGA)
@@ -92,7 +92,7 @@ class RobotAPI:
         self.vacuum_pub = None
         self.odom_sub = None
 
-        # UDP Socket untuk pengiriman Wi-Fi langsung ke ESP32-CAM
+        # UDP Socket untuk pengiriman Wi-Fi langsung ke ESP32-Control (192.168.4.10)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             self.sock.setblocking(False)
@@ -104,6 +104,7 @@ class RobotAPI:
         self.current_angular_z = 0.0
         self.current_gripper = 0   # 0: OPEN, 90: CLOSED
         self.current_lift = 0      # 0: DOWN, 90: UP
+        self.current_camera = 90   # Sudut Servo Kamera (0 - 180, default 90 netral)
         self.battery_v = 12.0
         self.battery_pct = 95
 
@@ -206,9 +207,15 @@ class RobotAPI:
             "lin": round(self.current_linear_x, 2),
             "ang": round(self.current_angular_z, 2),
             "grip": self.current_gripper,
-            "lift": self.current_lift
+            "lift": self.current_lift,
+            "cam": self.current_camera
         }
         self._send_udp_esp(payload)
+
+    def set_camera(self, angle):
+        """Mengatur sudut servo kamera (0 - 180 derajat)."""
+        self.current_camera = max(0, min(int(angle), 180))
+        self.move(self.current_linear_x, self.current_angular_z)
 
     def set_gripper(self, angle_or_state):
         """Mengatur posisi servo gripper (Jepit/Buka)."""
@@ -377,6 +384,15 @@ class Controller:
                 self.robot.set_gripper("CLOSE" if str(value).lower() in ("close", "1", "true") else "OPEN")
             elif name == "lift":
                 self.robot.set_lift("UP" if str(value).lower() in ("up", "1", "true") else "DOWN")
+            elif name == "cam":
+                self.robot.set_camera(int(value))
+                self._event(f"Kamera: {self.robot.current_camera}°")
+            elif name == "cam_up":
+                self.robot.set_camera(self.robot.current_camera + int(value or 10))
+                self._event(f"Kamera: {self.robot.current_camera}°")
+            elif name == "cam_down":
+                self.robot.set_camera(self.robot.current_camera - int(value or 10))
+                self._event(f"Kamera: {self.robot.current_camera}°")
             elif name == "speed":
                 step = 0.1 if float(value) > 0 else -0.1
                 self.speed_scale = round(_clamp(self.speed_scale + step, 0.2, 1.5), 2)
@@ -657,8 +673,13 @@ class Controller:
             return frame_out, self.telemetry()
 
     def idle(self):
-        """Dipanggil saat TIDAK ada frame baru: pastikan robot berhenti & HUD tahu link putus."""
+        """Dipanggil saat TIDAK ada frame baru: MANUAL tetap bisa jalan, AUTO berhenti aman."""
         with self._lock:
+            if self.mode == "MANUAL":
+                lin, ang = self._manual_command(time.time())
+                self._cmd = (lin, ang)
+                self.robot.move(lin, ang)
+                return
             self._cmd = (0.0, 0.0)
             self._held = set()
             self._cancel_pickup()
@@ -695,6 +716,7 @@ class Controller:
                 "ang": round(self._cmd[1], 2),
                 "grip": int(getattr(self.robot, "current_gripper", 0)),
                 "lift": int(getattr(self.robot, "current_lift", 0)),
+                "cam": int(getattr(self.robot, "current_camera", 90)),
                 "speed_scale": self.speed_scale,
                 "keys": sorted(self._held),
                 "fps": round(self._fps, 1),

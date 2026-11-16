@@ -216,7 +216,11 @@
     </section>
 
     <section class="card">
-      <h2>Gripper &amp; Lift</h2>
+      <h2>Aktuator &amp; Servo</h2>
+      <div class="row">
+        <button id="btnCamUp" class="blue">Kamera Atas <kbd>Q</kbd></button>
+        <button id="btnCamDn">Kamera Bawah <kbd>E</kbd></button>
+      </div>
       <div class="row">
         <button id="btnGripClose" class="green">Jepit <kbd>J</kbd></button>
         <button id="btnGripOpen">Buka <kbd>K</kbd></button>
@@ -272,20 +276,21 @@
       <div style="margin-bottom:8px">
         <label for="otaTargetSelect" style="font-size:11px;font-weight:600;display:block;margin-bottom:4px;color:var(--muted)">Target ESP Flash:</label>
         <select id="otaTargetSelect" style="width:100%;margin-bottom:8px">
-          <option value="http://192.168.4.10/update" data-name="ESP32-CAM" selected>ESP32-CAM (Streamer · 192.168.4.10:80)</option>
-          <option value="http://192.168.4.1/update" data-name="ESP32-Control">ESP32-Control (Motor/Servo · 192.168.4.1:80)</option>
+          <option value="cam" data-url="http://192.168.4.1/update" data-name="ESP32-CAM" selected>ESP32-CAM (Kamera &amp; AP Utama · 192.168.4.1:80)</option>
+          <option value="control" data-url="http://192.168.4.10/update" data-name="ESP32-Control">ESP32-Control (Motor &amp; Nano · 192.168.4.10:80)</option>
         </select>
       </div>
+      <button id="btnAutoFlash" style="width:100%;padding:10px;font-size:12px;font-weight:700;background:var(--b-green);color:var(--t-green);border:1px solid #10b98155;border-radius:6px;cursor:pointer;margin-bottom:8px">⚡ 1-Klik Compile .ino &amp; Flash OTA</button>
       <div class="row">
-        <a id="btnOta" class="row-link" href="http://192.168.4.10/update" target="_blank" rel="noopener">Buka Halaman Flash ESP32-CAM ↗</a>
+        <a id="btnOta" class="row-link" href="http://192.168.4.1/update" target="_blank" rel="noopener">Buka Web Flash ESP32-CAM ↗</a>
       </div>
       <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px">Flash Nirkabel dari HMI (.bin):</div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px">Atau Upload Manual File .bin:</div>
         <input type="file" id="hmiOtaFile" accept=".bin" style="width:100%;font-size:11px;margin-bottom:6px">
-        <button id="btnHmiFlash" style="width:100%;padding:8px;font-size:12px;font-weight:600;background:var(--b-blue);color:var(--t-blue);border:1px solid transparent;border-radius:6px;cursor:pointer">Flash ke Target Terpilih</button>
-        <div id="hmiOtaStatus" style="font-size:11px;font-weight:600;margin-top:6px;min-height:16px;text-align:center"></div>
+        <button id="btnHmiFlash" style="width:100%;padding:8px;font-size:12px;font-weight:600;background:var(--b-blue);color:var(--t-blue);border:1px solid transparent;border-radius:6px;cursor:pointer">Flash File .bin</button>
+        <div id="hmiOtaStatus" style="font-size:11px;font-weight:600;margin-top:6px;min-height:16px;text-align:center;white-space:pre-wrap"></div>
       </div>
-      <div class="hint">Pilih target board (ESP32-CAM di 192.168.4.10 atau ESP32-Control di 192.168.4.1), lalu buka halaman flash atau upload biner firmware .bin langsung tanpa kabel.</div>
+      <div class="hint">Tombol 1-Klik otomatis mengompilasi file .ino terbaru di laptop lalu menembakkannya via Wi-Fi ke ESP32 tanpa perlu file .bin manual!</div>
     </section>
 
     <section class="card">
@@ -342,12 +347,12 @@ let state = null, serverOk = false;
 async function post(path, body) {
   try {
     const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
-    if (res.ok) {
-      try { return await res.json(); } catch (e) { return { ok: true }; }
-    }
-    return { ok: false };
+    let data = null;
+    try { data = await res.json(); } catch (e) {}
+    if (res.ok) return data || { ok: true };
+    return data ? { ...data, ok: false } : { ok: false, error: `HTTP ${res.status}` };
   } catch (e) {
-    return { ok: false };
+    return { ok: false, error: e.message || "Koneksi ke server HMI gagal" };
   }
 }
 const action = (name, value) => post("/api/action", { name, value });
@@ -552,6 +557,8 @@ const ACTIONS = {
   Digit3: () => { pulseButton("btnBlue"); action("color", "BLUE"); }, Numpad3: () => { pulseButton("btnBlue"); action("color", "BLUE"); },
   Digit4: () => { pulseButton("btnYellow"); action("color", "YELLOW"); }, Numpad4: () => { pulseButton("btnYellow"); action("color", "YELLOW"); },
   KeyR: () => { pulseButton("btnCancel"); action("cancel_target"); },
+  KeyQ: () => { pulseButton("btnCamUp"); action("cam_up", 10); },
+  KeyE: () => { pulseButton("btnCamDn"); action("cam_down", 10); },
   KeyJ: () => { pulseButton("btnGripClose"); action("grip", "close"); }, KeyK: () => { pulseButton("btnGripOpen"); action("grip", "open"); },
   KeyU: () => { pulseButton("btnLiftUp"); action("lift", "up"); }, KeyI: () => { pulseButton("btnLiftDown"); action("lift", "down"); },
   Equal: () => { pulseButton("btnSpdUp"); action("speed", 1); }, NumpadAdd: () => { pulseButton("btnSpdUp"); action("speed", 1); }, BracketRight: () => { pulseButton("btnSpdUp"); action("speed", 1); },
@@ -608,6 +615,8 @@ document.querySelectorAll("[data-color]").forEach((b) => (b.onclick = () => { pu
 $("btnCancel").onclick = () => { pulseButton("btnCancel"); action("cancel_target"); };
 $("btnSpdUp").onclick = () => { pulseButton("btnSpdUp"); action("speed", 1); };
 $("btnSpdDn").onclick = () => { pulseButton("btnSpdDn"); action("speed", -1); };
+$("btnCamUp").onclick = () => { pulseButton("btnCamUp"); action("cam_up", 10); };
+$("btnCamDn").onclick = () => { pulseButton("btnCamDn"); action("cam_down", 10); };
 $("btnGripClose").onclick = () => { pulseButton("btnGripClose"); action("grip", "close"); };
 $("btnGripOpen").onclick = () => { pulseButton("btnGripOpen"); action("grip", "open"); };
 $("btnLiftUp").onclick = () => { pulseButton("btnLiftUp"); action("lift", "up"); };
@@ -626,10 +635,47 @@ const otaSel = $("otaTargetSelect");
 const btnOta = $("btnOta");
 if (otaSel && btnOta) {
   otaSel.addEventListener("change", () => {
-    btnOta.href = otaSel.value;
     const opt = otaSel.options[otaSel.selectedIndex];
-    btnOta.textContent = `Buka Halaman Flash ${opt.dataset.name || "Target"} ↗`;
+    const url = opt.dataset.url || "http://192.168.4.1/update";
+    btnOta.href = url;
+    btnOta.textContent = `Buka Web Flash ${opt.dataset.name || "Target"} ↗`;
   });
+  btnOta.addEventListener("click", () => {
+    if (otaSel.value === "cam") {
+      post("/api/stream_pause", { paused: true, duration: 25 });
+    }
+  });
+}
+
+const btnAutoFlash = $("btnAutoFlash");
+if (btnAutoFlash) {
+  btnAutoFlash.onclick = async () => {
+    const stEl = $("hmiOtaStatus");
+    const targetKey = otaSel ? otaSel.value : "control";
+    const targetName = otaSel ? otaSel.options[otaSel.selectedIndex].dataset.name : "ESP32";
+
+    btnAutoFlash.disabled = true;
+    stEl.style.color = "#38bdf8";
+    stEl.textContent = `⚙️ Mengompilasi .ino & mengunggah ke ${targetName} via Wi-Fi... jangan matikan robot!`;
+
+    try {
+      const res = await post("/api/flash_ota", { target: targetKey });
+      if (res && res.ok) {
+        stEl.style.color = "#4ade80";
+        stEl.textContent = `🎉 SUKSES! ${targetName} berhasil di-flash (.ino -> .bin) dan sedang reboot...`;
+        setTimeout(() => { stEl.textContent = ""; btnAutoFlash.disabled = false; }, 8000);
+      } else {
+        stEl.style.color = "#f87171";
+        const detail = (res && (res.error || res.output)) ? String(res.error || res.output).trim() : "Server HMI tidak merespon (periksa terminal main.py)";
+        stEl.textContent = `❌ ${detail.slice(-260)}`;
+        btnAutoFlash.disabled = false;
+      }
+    } catch (err) {
+      stEl.style.color = "#f87171";
+      stEl.textContent = `❌ Gagal koneksi: ${err.message}. Jalankan 'python3 flash_ota.py ${targetKey}' di terminal.`;
+      btnAutoFlash.disabled = false;
+    }
+  };
 }
 
 const btnHmiFlash = $("btnHmiFlash");
@@ -642,14 +688,20 @@ if (btnHmiFlash) {
       alert("Pilih file binary firmware (.bin) terlebih dahulu!");
       return;
     }
-    const targetUrl = otaSel ? otaSel.value : "http://192.168.4.10/update";
-    const targetName = otaSel ? otaSel.options[otaSel.selectedIndex].dataset.name : "ESP32";
+    const opt = otaSel ? otaSel.options[otaSel.selectedIndex] : null;
+    const targetKey = otaSel ? otaSel.value : "cam";
+    const targetUrl = opt ? opt.dataset.url : "http://192.168.4.1/update";
+    const targetName = opt ? opt.dataset.name : "ESP32";
 
     btnHmiFlash.disabled = true;
     stEl.style.color = "#38bdf8";
     stEl.textContent = `Mengunggah ke ${targetName}... jangan matikan robot!`;
 
     try {
+      if (targetKey === "cam") {
+        await post("/api/stream_pause", { paused: true, duration: 30 });
+        await new Promise((r) => setTimeout(r, 350));
+      }
       const res = await fetch(targetUrl, { method: "POST", body: file });
       if (res.ok) {
         stEl.style.color = "#4ade80";
@@ -664,6 +716,10 @@ if (btnHmiFlash) {
       stEl.style.color = "#f87171";
       stEl.textContent = `Koneksi gagal (${err.message}). Buka langsung tombol di atas.`;
       btnHmiFlash.disabled = false;
+    } finally {
+      if (targetKey === "cam") {
+        post("/api/stream_pause", { paused: false });
+      }
     }
   };
 }
@@ -805,6 +861,7 @@ function updatePanel() {
     ["Lin (m/s)", s.lin.toFixed(2)], ["Ang (rad/s)", s.ang.toFixed(2)],
     ["Speed", Math.round(s.speed_scale * 100) + "%"], ["Warna", s.color],
     ["Gripper", s.grip + "° " + (s.grip > 45 ? "JEPIT" : "BUKA")], ["Lift", s.lift + "° " + (s.lift > 45 ? "NAIK" : "TURUN")],
+    ["Kamera", (s.cam !== undefined ? s.cam : 90) + "°"],
     ["Odom (X, Y)", `${(s.odom_x || 0).toFixed(2)}m, ${(s.odom_y || 0).toFixed(2)}m`],
     ["Heading (θ)", `${(s.odom_deg || 0).toFixed(1)}°`],
     ["Gerak Objek", s.obj_speed > 18 ? `${s.obj_speed.toFixed(0)} px/s [${s.obj_dir}]` : "DIAM"],

@@ -6,27 +6,25 @@
  * serta dilengkapi HTTP Web Server Port 80 untuk OTA Firmware Update Nirkabel.
  *
  * Fitur:
- * 1. Nirkabel (Wi-Fi UDP Port 8888):
- *    - Wi-Fi SoftAP "dimas_asoy_geboy", Password "12345678" (IP: 192.168.4.1).
- *    - Menerima kontrol JSON {"lin", "ang", "grip", "lift"} dari ESP32-CAM / Laptop.
+ * 1. Nirkabel (Wi-Fi Station UDP Port 8888):
+ *    - Konek ke SoftAP ESP32-CAM "dimas_asoy_geboy" (password "12345678") dengan Static IP 192.168.4.10.
+ *    - Auto-reconnect di loop() jika ESP32-CAM telat menyala (tanpa membuat AP kembar).
+ *    - Menerima kontrol JSON {"lin", "ang", "grip", "lift", "cam"} langsung dari Laptop / ESP32-CAM.
  * 2. Web Server & OTA Update (Port 80):
- *    - Halaman OTA Update di http://192.168.4.1/update untuk flash biner firmware (.bin).
- *    - Mendukung navigasi pemilihan target flash (ESP32-Control vs ESP32-CAM).
- * 3. Kabel Serial UART2 (Fallback/Backup):
- *    - Tetap menerima instruksi Serial UART (Format: "CMD:lin,ang,grip,lift\n").
+ *    - Halaman OTA Update di http://192.168.4.10/update untuk flash biner firmware (.bin).
+ *    - Mendukung navigasi pemilihan target flash (ESP32-Control 192.168.4.10 vs ESP32-CAM 192.168.4.1).
+ * 3. Kabel Serial UART2 ke Arduino Nano (GPIO22 TX2 -> D0, GPIO23 RX2 <- D1):
+ *    - Mengirim perintah aktuator ("ACT:cam,lift,grip\n") ke Arduino Nano.
+ *    - Tetap mendukung fallback perintah Serial ("CMD:lin,ang,grip,lift,cam\n").
  * 4. Mengendalikan Motor DC Kiri & Kanan (Differential Drive PWM L298N/BTS7960) sesuai pin program_dimas:
- *    - ENA: 4, IN1: 16, IN2: 17, ENB: 19, IN3: 21, IN4: 18
- * 5. Mengendalikan Servo Gripper & Servo Lift sesuai pin program_dimas:
- *    - SERVO_GRIPPER_PIN: 7
- *    - SERVO_LIFT_PIN: 3
- * 6. Failsafe: motor berhenti otomatis bila tidak ada perintah valid selama 500 ms.
- * 7. Telemetri Baterai: membaca ADC GPIO34 dan mengirim status ke ESP32-CAM (192.168.4.10) & Laptop (broadcast).
+ *    - ENA: 4, IN1: 16, IN2: 17, ENB: 21, IN3: 19, IN4: 18
+ * 5. Failsafe: motor berhenti otomatis bila tidak ada perintah valid selama 500 ms.
+ * 6. Telemetri Baterai: membaca ADC GPIO34 dan mengirim status langsung ke Laptop, ESP32-CAM (192.168.4.1) & broadcast.
  */
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <ArduinoJson.h>
-#include <ESP32Servo.h>
 #include "esp_http_server.h"
 #include <Update.h>
 
@@ -35,26 +33,24 @@
 #define IN1_PIN 16  // Direction 1 Left
 #define IN2_PIN 17  // Direction 2 Left
 
-#define ENB_PIN 19  // PWM Speed Right
-#define IN3_PIN 21  // Direction 1 Right
+#define ENB_PIN 21  // PWM Speed Right
+#define IN3_PIN 19  // Direction 1 Right
 #define IN4_PIN 18  // Direction 2 Right
 
-// PIN SERVO - Sesuai program_dimas
-#define SERVO_GRIPPER_PIN 7
-#define SERVO_LIFT_PIN    3
-
-// PIN HARDWARE SERIAL UART2 RECEIVER DARI ESP32-CAM (Backup Kabel)
-#define RX2_PIN 27
-#define TX2_PIN 26
+// PIN HARDWARE SERIAL UART2 KE ARDUINO NANO (AKTUATOR SUB-CONTROLLER)
+#define RX2_PIN 23  // RX2 ESP32 <- TX Nano (D1)
+#define TX2_PIN 22  // TX2 ESP32 -> RX Nano (D0)
 
 // PIN SENSOR BATERAI (ADC Input-Only GPIO34)
 #define PIN_BATTERY_ADC 34
 #define BATT_DIVIDER_RATIO 4.0f // Rasio pembagi tegangan (misal 30k:10k) untuk LiPo 3S (11.1V - 12.6V)
 
-// KONFIGURASI WI-FI & UDP - Sesuai program_dimas
-const char* AP_SSID = "dimas_asoy_geboy";
-const char* AP_PASS = "12345678";
-const int UDP_PORT  = 8888;
+// KONFIGURASI WI-FI & UDP
+const char* STA_SSID = "dimas-cam";      // Konek ke SoftAP ESP32-CAM (192.168.4.10)
+const char* STA_PASS = "12345678";
+const char* AP_SSID  = "dimas-control";  // SoftAP mandiri Control (192.168.5.1) untuk OTA/akses darurat
+const char* AP_PASS  = "12345678";
+const int UDP_PORT   = 8888;
 
 // Kinematika Differential Drive - Sesuai program_dimas
 const float WHEEL_BASE = 0.26; // 26 cm
@@ -62,9 +58,8 @@ const float MAX_SPEED  = 0.50; // 0.5 m/s
 const unsigned long FAILSAFE_MS = 500;
 
 WiFiUDP udp;
-Servo gripperServo;
-Servo liftServo;
 httpd_handle_t control_httpd = NULL;
+
 
 unsigned long lastCmdMs = 0;
 bool motorsStopped = true;
@@ -75,6 +70,7 @@ float currentLinear = 0.0f;
 float currentAngular = 0.0f;
 int currentGrip = 0;
 int currentLift = 0;
+int currentCam = 90; // Default posisi tengah kamera (0 - 180 derajat)
 float batteryVoltage = 12.0f;
 
 // ------------------------------------------------------------
@@ -103,20 +99,20 @@ static const char OTA_CONTROL_HTML[] =
   ".nav-bar a{color:#60a5fa;text-decoration:none;font-weight:500}"
   ".nav-bar a:hover{text-decoration:underline}"
   "</style></head><body><div class='card'>"
-  "<div class='badge'>SISTEM KONTROL MOTOR &amp; SERVO</div>"
+  "<div class='badge'>SISTEM KONTROL MOTOR &amp; NANO (STATION)</div>"
   "<h1>ESP32-Control OTA Update</h1>"
-  "<p>Upload binary (.bin) untuk firmware ESP32 Sistem Kontrol (IP: 192.168.4.1:80).</p>"
+  "<p>Upload binary (.bin) untuk firmware ESP32 Sistem Kontrol (IP: 192.168.4.10:80).</p>"
   "<div class='selector-title'>Pilih Target Board ESP:</div>"
   "<div class='target-switch'>"
-  "<a class='target-btn active' href='#'><b>ESP-Control</b><span>192.168.4.1 (Saat Ini)</span></a>"
-  "<a class='target-btn' href='http://192.168.4.10/update'><b>ESP-CAM</b><span>192.168.4.10 ↗</span></a>"
+  "<a class='target-btn active' href='#'><b>ESP-Control</b><span>192.168.4.10 (Saat Ini)</span></a>"
+  "<a class='target-btn' href='http://192.168.4.1/update'><b>ESP-CAM</b><span>192.168.4.1 ↗</span></a>"
   "</div>"
   "<input type='file' id='fw' accept='.bin'>"
   "<button id='btn' onclick='startUpdate()'>Flash ESP32-Control (.bin)</button>"
   "<div id='status'></div>"
   "<div class='nav-bar'>"
   "<a href='/'>← Status Motor/Servo</a>"
-  "<a href='http://192.168.4.10/stream' target='_blank'>Stream Kamera (192.168.4.10) ↗</a>"
+  "<a href='http://192.168.4.1/stream' target='_blank'>Stream Kamera (192.168.4.1) ↗</a>"
   "</div></div><script>"
   "async function startUpdate(){"
   "const f=document.getElementById('fw').files[0];"
@@ -144,27 +140,42 @@ static const char ROOT_CONTROL_HTML[] =
   "</style></head><body><div class='card'>"
   "<h1>ESP32-Control Status</h1>"
   "<table>"
-  "<tr><td>Board</td><td>ESP32 Sistem Kontrol (Motor + Servo)</td></tr>"
-  "<tr><td>Wi-Fi Mode</td><td>SoftAP 'dimas_asoy_geboy'</td></tr>"
-  "<tr><td>IP Address</td><td>192.168.4.1 (Port 80 &amp; 8888)</td></tr>"
-  "<tr><td>Target ESP-CAM</td><td>192.168.4.10 (Stream &amp; OTA)</td></tr>"
+  "<tr><td>Board</td><td>ESP32 Sistem Kontrol (Motor + Nano Aktuator)</td></tr>"
+  "<tr><td>Wi-Fi Mode</td><td>Station -&gt; ESP32-CAM (dimas_asoy_geboy)</td></tr>"
+  "<tr><td>IP Address</td><td>192.168.4.10 (OTA Port 80 &amp; UDP 8888)</td></tr>"
+  "<tr><td>Target ESP-CAM</td><td>192.168.4.1 (AP Utama &amp; Kamera Stream)</td></tr>"
   "<tr><td>Failsafe</td><td>500 ms Auto-STOP Aktif</td></tr>"
   "</table>"
   "<a class='btn' href='/update'>Buka OTA Flash ESP32-Control ↗</a>"
-  "<a class='btn btn-cam' href='http://192.168.4.10/update'>Buka OTA Flash ESP32-CAM (192.168.4.10) ↗</a>"
+  "<a class='btn btn-cam' href='http://192.168.4.1/update'>Buka OTA Flash ESP32-CAM (192.168.4.1) ↗</a>"
   "</div></body></html>";
 
+static void set_cors_headers(httpd_req_t *req) {
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+}
+
+static esp_err_t ota_options_handler(httpd_req_t *req) {
+  set_cors_headers(req);
+  httpd_resp_set_status(req, "204 No Content");
+  return httpd_resp_send(req, NULL, 0);
+}
+
 static esp_err_t ota_get_handler(httpd_req_t *req) {
+  set_cors_headers(req);
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_sendstr(req, OTA_CONTROL_HTML);
 }
 
 static esp_err_t root_get_handler(httpd_req_t *req) {
+  set_cors_headers(req);
   httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_sendstr(req, ROOT_CONTROL_HTML);
 }
 
 static esp_err_t ota_post_handler(httpd_req_t *req) {
+  set_cors_headers(req);
   size_t total = req->content_len;
   if (!Update.begin(total > 0 ? total : UPDATE_SIZE_UNKNOWN)) {
     httpd_resp_send_500(req);
@@ -218,6 +229,12 @@ void startControlServer() {
     .handler   = ota_post_handler,
     .user_ctx  = NULL
   };
+  httpd_uri_t ota_opt_uri = {
+    .uri       = "/update",
+    .method    = HTTP_OPTIONS,
+    .handler   = ota_options_handler,
+    .user_ctx  = NULL
+  };
   httpd_uri_t root_uri = {
     .uri       = "/",
     .method    = HTTP_GET,
@@ -228,8 +245,9 @@ void startControlServer() {
   if (httpd_start(&control_httpd, &config) == ESP_OK) {
     httpd_register_uri_handler(control_httpd, &ota_get_uri);
     httpd_register_uri_handler(control_httpd, &ota_post_uri);
+    httpd_register_uri_handler(control_httpd, &ota_opt_uri);
     httpd_register_uri_handler(control_httpd, &root_uri);
-    Serial.println("[ESP32-CONTROL] HTTP Web Server & OTA aktif di port 80 (http://192.168.4.1/update)");
+    Serial.println("[ESP32-CONTROL] HTTP Web Server & OTA aktif di port 80 (http://192.168.4.10/update)");
   } else {
     Serial.println("[ESP32-CONTROL ERROR] Gagal memulai HTTP Web Server!");
   }
@@ -264,20 +282,19 @@ void applyMotorControl(float linear_x, float angular_z) {
 }
 
 void printESP32IPInfo() {
-  IPAddress ip = (WiFi.getMode() == WIFI_AP) ? WiFi.softAPIP() : WiFi.localIP();
+  IPAddress staIp = WiFi.localIP();
   Serial.println("\n==================================================");
-  Serial.print("[INFO ESP32-CONTROL] Wi-Fi SSID       : "); Serial.println(AP_SSID);
-  Serial.print("[INFO ESP32-CONTROL] IP Address       : "); Serial.println(ip);
-  Serial.printf("[INFO ESP32-CONTROL] Mode             : %s\n", (WiFi.getMode() == WIFI_AP) ? "SoftAP Mandiri" : "Station (Nirkabel ke CAM)");
-  Serial.printf("[INFO ESP32-CONTROL] HTTP & OTA Port  : 80 (http://%s/update)\n", ip.toString().c_str());
+  Serial.printf("[INFO ESP32-CONTROL] STA Target SSID  : %s (%s)\n", STA_SSID,
+                WiFi.status() == WL_CONNECTED ? "TERHUBUNG" : "MENUNGGU AP CAM...");
+  Serial.print("[INFO ESP32-CONTROL] STA IP Address   : "); Serial.println(staIp);
+  Serial.printf("[INFO ESP32-CONTROL] HTTP & OTA Port  : 80 (http://%s/update)\n", staIp.toString().c_str());
   Serial.printf("[INFO ESP32-CONTROL] UDP Control Port : %d\n", UDP_PORT);
-  Serial.printf("[INFO ESP32-CONTROL] Client Terhubung : %d\n", WiFi.softAPgetStationNum());
   Serial.println("==================================================\n");
 }
 
 void setup() {
   Serial.begin(115200);                                     // Debug Serial USB
-  Serial2.begin(115200, SERIAL_8N1, RX2_PIN, TX2_PIN);     // Hardware Serial UART2 Kabel (Backup)
+  Serial2.begin(115200, SERIAL_8N1, RX2_PIN, TX2_PIN);     // Hardware Serial UART2 ke Arduino Nano Aktuator
 
   pinMode(ENA_PIN, OUTPUT);
   pinMode(IN1_PIN, OUTPUT);
@@ -286,47 +303,72 @@ void setup() {
   pinMode(IN3_PIN, OUTPUT);
   pinMode(IN4_PIN, OUTPUT);
 
-  gripperServo.attach(SERVO_GRIPPER_PIN);
-  liftServo.attach(SERVO_LIFT_PIN);
+  // Kirim posisi awal aktuator ke Arduino Nano
+  delay(100);
+  Serial2.printf("ACT:%d,%d,%d\n", currentCam, currentLift, currentGrip);
 
-  // Default Position
-  gripperServo.write(0); // Open
-  liftServo.write(0);    // Down
+  // Inisialisasi Wi-Fi Station murni ke ESP32-CAM ("dimas-cam") dengan Static IP 192.168.4.10
+  // (Lebih hemat daya & stabil daripada AP_STA; auto-reconnect di loop())
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
 
-  // Inisialisasi Wi-Fi Access Point (Sesuai persis program_dimas/robot.ino)
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
+  IPAddress local_IP(192, 168, 4, 10);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.config(local_IP, gateway, subnet);
+  WiFi.begin(STA_SSID, STA_PASS);
+  WiFi.setSleep(false);
+
+  Serial.printf("\n[ESP32-CONTROL] Menyambungkan ke AP '%s'...\n", STA_SSID);
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 5000) {
+    delay(200);
+    Serial.print(".");
+  }
+  Serial.println();
   printESP32IPInfo();
 
-  // Memulai HTTP Server Port 80 untuk OTA
+  // Memulai HTTP Server Port 80 untuk OTA & status dashboard
   startControlServer();
 
   udp.begin(UDP_PORT);
   Serial.printf("[ESP32-CONTROL] UDP Listener nirkabel mendengarkan pada Port %d (IP: %s)...\n",
-                UDP_PORT, WiFi.softAPIP().toString().c_str());
+                UDP_PORT, WiFi.localIP().toString().c_str());
 }
 
-void handleCommand(float lin, float ang, int grip, int lift) {
+void handleCommand(float lin, float ang, int grip, int lift, int cam = -1) {
   applyMotorControl(lin, ang);
   currentGrip = constrain(grip, 0, 180);
   currentLift = constrain(lift, 0, 180);
-  gripperServo.write(currentGrip);
-  liftServo.write(currentLift);
+  if (cam >= 0) {
+    currentCam = constrain(cam, 0, 180);
+  }
+
+  // Teruskan instruksi aktuator (Kamera, Lift, Gripper) ke Arduino Nano via Serial2
+  Serial2.printf("ACT:%d,%d,%d\n", currentCam, currentLift, currentGrip);
+
   lastCmdMs = millis();
   motorsStopped = (lin == 0.0f && ang == 0.0f);
 }
 
 void handleLine(char *line) {
-  if (strncmp(line, "CMD:", 4) != 0) return;
-  float lin = 0.0f, ang = 0.0f;
-  int grip = 0, lift = 0;
-  if (sscanf(line + 4, "%f,%f,%d,%d", &lin, &ang, &grip, &lift) != 4) return;
-  handleCommand(lin, ang, grip, lift);
+  if (strncmp(line, "ACK:", 4) == 0) {
+    // Respon ACK dari Arduino Nano aktuator
+    return;
+  }
+  if (strncmp(line, "CMD:", 4) == 0) {
+    float lin = 0.0f, ang = 0.0f;
+    int grip = 0, lift = 0, cam = -1;
+    int parsed = sscanf(line + 4, "%f,%f,%d,%d,%d", &lin, &ang, &grip, &lift, &cam);
+    if (parsed >= 4) {
+      handleCommand(lin, ang, grip, lift, cam >= 0 ? cam : currentCam);
+    }
 
-  static unsigned long lastPrint = 0;
-  if (millis() - lastPrint > 300) {
-    lastPrint = millis();
-    Serial.printf("[RECV SERIAL2] Lin:%.2f | Ang:%.2f | Grip:%d | Lift:%d\n", lin, ang, grip, lift);
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint > 300) {
+      lastPrint = millis();
+      Serial.printf("[RECV CMD] Lin:%.2f | Ang:%.2f | Cam:%d | Grip:%d | Lift:%d\n", lin, ang, currentCam, grip, lift);
+    }
   }
 }
 
@@ -337,9 +379,22 @@ void loop() {
     printESP32IPInfo();
   }
 
-  // 1. Terima paket nirkabel UDP dari ESP32-CAM / Laptop
+  // 0. Auto-reconnect Wi-Fi Station jika terputus / ESP32-CAM baru menyala belakangan
+  static unsigned long lastReconnectAttempt = 0;
+  if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectAttempt > 5000) {
+    lastReconnectAttempt = millis();
+    Serial.println("[ESP32-CONTROL] Wi-Fi terputus, mencoba menyambung ulang ke AP...");
+    WiFi.disconnect(false);
+    WiFi.begin(STA_SSID, STA_PASS);
+  }
+
+  // 1. Terima paket nirkabel UDP langsung dari Laptop / ESP32-CAM
+  static IPAddress lastClientIP;
+  static uint16_t lastClientPort = 0;
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
+    IPAddress remote = udp.remoteIP();
+    uint16_t rport = udp.remotePort();
     char packetBuffer[256];
     int len = udp.read(packetBuffer, sizeof(packetBuffer) - 1);
     if (len > 0) {
@@ -348,17 +403,22 @@ void loop() {
       StaticJsonDocument<256> doc;
       DeserializationError error = deserializeJson(doc, packetBuffer);
       if (!error && (doc.containsKey("lin") || doc.containsKey("ang"))) {
+        if (remote != IPAddress(192, 168, 4, 1)) {
+          lastClientIP = remote;
+          lastClientPort = rport;
+        }
         float lin = doc["lin"] | 0.0f;
         float ang = doc["ang"] | 0.0f;
         int grip  = doc["grip"] | 0;
         int lift  = doc["lift"] | 0;
+        int cam   = doc.containsKey("cam") ? (int)doc["cam"] : currentCam;
 
-        handleCommand(lin, ang, grip, lift);
+        handleCommand(lin, ang, grip, lift, cam);
 
         static unsigned long lastUdpPrint = 0;
         if (millis() - lastUdpPrint > 300) {
           lastUdpPrint = millis();
-          Serial.printf("[RECV UDP NIRKABEL] Lin:%.2f | Ang:%.2f | Grip:%d | Lift:%d\n", lin, ang, grip, lift);
+          Serial.printf("[RECV UDP NIRKABEL] Lin:%.2f | Ang:%.2f | Cam:%d | Grip:%d | Lift:%d\n", lin, ang, currentCam, grip, lift);
         }
       }
     }
@@ -400,19 +460,25 @@ void loop() {
     // Kirim via kabel Serial2
     Serial2.printf("BATT:%.2f\n", v);
 
-    // Kirim nirkabel via UDP ke ESP32-CAM (192.168.4.10) dan broadcast (192.168.4.255)
-    char battBuf[64];
-    int blen = snprintf(battBuf, sizeof(battBuf), "{\"batt\":%.2f,\"pct\":%d}\n", v, pct);
-    
-    // Kirim langsung ke ESP32-CAM
-    udp.beginPacket(IPAddress(192, 168, 4, 10), UDP_PORT);
-    udp.write((const uint8_t*)battBuf, blen);
-    udp.endPacket();
+    // Kirim nirkabel via UDP langsung ke Laptop, ESP32-CAM (192.168.4.1), dan broadcast (192.168.4.255)
+    if (WiFi.status() == WL_CONNECTED) {
+      char battBuf[64];
+      int blen = snprintf(battBuf, sizeof(battBuf), "{\"batt\":%.2f,\"pct\":%d}\n", v, pct);
 
-    // Broadcast ke laptop
-    udp.beginPacket(IPAddress(192, 168, 4, 255), UDP_PORT);
-    udp.write((const uint8_t*)battBuf, blen);
-    udp.endPacket();
+      if (lastClientPort > 0) {
+        udp.beginPacket(lastClientIP, lastClientPort);
+        udp.write((const uint8_t*)battBuf, blen);
+        udp.endPacket();
+      }
+
+      udp.beginPacket(IPAddress(192, 168, 4, 1), UDP_PORT);
+      udp.write((const uint8_t*)battBuf, blen);
+      udp.endPacket();
+
+      udp.beginPacket(IPAddress(192, 168, 4, 255), UDP_PORT);
+      udp.write((const uint8_t*)battBuf, blen);
+      udp.endPacket();
+    }
   }
 
   delay(2);

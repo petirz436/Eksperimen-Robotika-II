@@ -38,8 +38,9 @@ def parse_args():
     p = argparse.ArgumentParser(description="Eksbot2 Pilot Console")
     p.add_argument("--source", choices=["esp", "sim", "webcam"], default="sim" if launched_by_ros else "esp",
                    help="Sumber kamera & jalur perintah (default: esp, atau sim jika dari roslaunch)")
-    p.add_argument("--esp-ip", default="192.168.4.10", help="IP ESP32-CAM (default: 192.168.4.10)")
-    p.add_argument("--esp-port", type=int, default=8888, help="Port UDP kontrol ESP32-CAM (default: 8888)")
+    p.add_argument("--esp-ip", default="192.168.4.1", help="IP ESP32-CAM SoftAP (default: 192.168.4.1)")
+    p.add_argument("--control-ip", default="192.168.4.10", help="IP ESP32-Control UDP (default: 192.168.4.10)")
+    p.add_argument("--esp-port", type=int, default=8888, help="Port UDP kontrol ESP32-Control (default: 8888)")
     p.add_argument("--stream-url", default=None, help="Override URL stream MJPEG (default: http://<esp-ip>/stream)")
     p.add_argument("--image-topic", default="/camera/image_raw", help="Topik kamera ROS (mode sim)")
     p.add_argument("--webcam", type=int, default=0, help="Index webcam (mode webcam)")
@@ -116,16 +117,16 @@ def main():
         print("[MAIN] Mode ROS Simulasi: perintah -> /cmd_vel, kamera <- " + args.image_topic)
     else:
         stream_desc = args.stream_url or f"http://{args.esp_ip}/stream"
-        print(f"[MAIN] Mode robot fisik TANPA ROS: kamera <- {stream_desc}, perintah -> UDP {args.esp_ip}:{args.esp_port}")
+        print(f"[MAIN] Mode robot fisik TANPA ROS: kamera <- {stream_desc}, perintah -> UDP {args.control_ip}:{args.esp_port}")
 
     cam = open_source(args.source, esp_ip=args.esp_ip, esp_url=args.stream_url,
                       ros_topic=args.image_topic, webcam_index=args.webcam)
-    robot = RobotAPI(esp_ip=args.esp_ip, esp_port=args.esp_port, use_ros=use_ros)
+    robot = RobotAPI(esp_ip=args.control_ip, esp_port=args.esp_port, use_ros=use_ros)
     vision = VisionEngine()
     ctrl = Controller(robot, vision)
     ctrl.source_name = cam.name
 
-    hmi = HMIServer(ctrl, port=args.port).start()
+    hmi = HMIServer(ctrl, cam=cam, port=args.port).start()
     urls = hmi.urls()
     print("[HMI] Buka di browser: " + "  |  ".join(urls))
     if not args.no_browser:
@@ -162,8 +163,13 @@ def main():
                     cv.imshow(window, draw_gui_overlay(frame_out, tel))
             else:
                 # Menunggu frame baru dari stream kamera:
-                # Jika link kamera putus > 1.5s, beri sinyal idle failsafe
-                if now - last_frame_time > 1.5 and now - last_idle_send > 0.2:
+                # Mode MANUAL tetap kirim UDP agar robot tidak lumpuh meski kamera putus/pause OTA.
+                # Mode AUTO berhenti aman jika link kamera putus > 1.5s.
+                if ctrl.mode == "MANUAL":
+                    if now - last_idle_send > 0.05:
+                        ctrl.idle()
+                        last_idle_send = now
+                elif now - last_frame_time > 1.5 and now - last_idle_send > 0.2:
                     ctrl.idle()
                     last_idle_send = now
                 time.sleep(0.003)
