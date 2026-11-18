@@ -9,12 +9,9 @@
  * - Common GND: Pastikan GND Arduino Nano dan GND ESP32 terhubung bersama!
  *
  * Aktuator yang Dikendalikan:
- * 1. SERVO KAMERA  : Pin D9  (Sudut: 0 - 180°, Default: 90° Netral)
- * 2. SERVO LIFTER  : Pin D10 (Sudut: 0 - 180°, Default: 0° Bawah / Down)
- * 3. SERVO GRIPPER : Pin D11 (Sudut: 0 - 180°, Default: 0° Terbuka / Open)
- *
- * Persiapan Stepper Lifter (Bisa diaktifkan via #define LIFTER_USE_STEPPER 1):
- * - STEP: Pin D5, DIR: Pin D6, ENABLE: Pin D7
+ * 1. SERVO KAMERA (SG90)      : Pin D2       (Sudut: 0 - 180°, Default: 90° Netral)
+ * 2. LIFTER STEPPER (28BYJ-48): Pin D7, D8, D9, D10 -> ULN2003 IN1..IN4
+ * 3. SERVO GRIPPER KIRI/KANAN : Pin D11, D12 (Sudut: 0 - 180°, Default: 0° Terbuka / Open)
  *
  * Format Protokol Serial:
  * "ACT:<cam>,<lift>,<grip>\n"
@@ -29,65 +26,90 @@
 // ======================================================================
 // KONFIGURASI PIN & HARDWARE
 // ======================================================================
-#define SERVO_CAM_PIN     9   // Pin PWM Servo Kamera
-#define SERVO_LIFT_PIN    10  // Pin PWM Servo Lifter
-#define SERVO_GRIP_PIN    11  // Pin PWM Servo Gripper
-#define LED_INDICATOR_PIN 13  // LED bawaan Nano (indikator penerimaan data)
+#define SERVO_CAM_PIN     2  // Pin Servo Kamera
+#define CAM_RAMP_MS       18 // Jeda (ms) tiap 1 derajat gerak servo kamera agar smooth
+#define SERVO_GRIP_L_PIN  3  // Pin Servo Gripper Kiri
+#define SERVO_GRIP_R_PIN  4  // Pin Servo Gripper Kanan
+#define SERVO_SAPU_PIN    5  // Pin Servo Penyapu
+#define GRIP_R_INVERT     1  // 1 = arah kanan dibalik (180 - grip) agar menjepit simetris, 0 = searah
 
-// Atur ke 1 jika Lifter sudah diganti dari Servo menjadi Motor Stepper
-#define LIFTER_USE_STEPPER 0
+#define STEPPER_IN1_PIN   7
+#define STEPPER_IN2_PIN   8
+#define STEPPER_IN3_PIN   9
+#define STEPPER_IN4_PIN   10
+#define STEPPER_MAX_STEPS 4096L       // 4096 half-step = 1 putaran penuh 28BYJ-48 (sesuaikan panjang tali kerek)
+#define STEPPER_STEP_US   1100UL      // Interval antar half-step (microseconds, ~900 step/detik)
+#define STEPPER_HOLD_COIL 0           // 0 = matikan koil saat diam (dingin & hemat baterai), 1 = tahan posisi
 
-#if LIFTER_USE_STEPPER
-#define STEPPER_STEP_PIN  5
-#define STEPPER_DIR_PIN   6
-#define STEPPER_EN_PIN    7
-const long STEPS_PER_UNIT = 800; // Contoh resolusi langkah
+const uint8_t HALF_STEP_SEQ[8][4] = {
+  {1, 0, 0, 0},
+  {1, 1, 0, 0},
+  {0, 1, 0, 0},
+  {0, 1, 1, 0},
+  {0, 0, 1, 0},
+  {0, 0, 1, 1},
+  {0, 0, 0, 1},
+  {1, 0, 0, 1}
+};
+
 long targetStepperPos = 0;
 long currentStepperPos = 0;
-#endif
+uint8_t stepPhase = 0;
+unsigned long lastStepUs = 0;
+bool coilsActive = false;
+
+void setStepperCoils(uint8_t phase) {
+  digitalWrite(STEPPER_IN1_PIN, HALF_STEP_SEQ[phase][0]);
+  digitalWrite(STEPPER_IN2_PIN, HALF_STEP_SEQ[phase][1]);
+  digitalWrite(STEPPER_IN3_PIN, HALF_STEP_SEQ[phase][2]);
+  digitalWrite(STEPPER_IN4_PIN, HALF_STEP_SEQ[phase][3]);
+  coilsActive = true;
+}
+
+void releaseStepperCoils() {
+  digitalWrite(STEPPER_IN1_PIN, LOW);
+  digitalWrite(STEPPER_IN2_PIN, LOW);
+  digitalWrite(STEPPER_IN3_PIN, LOW);
+  digitalWrite(STEPPER_IN4_PIN, LOW);
+  coilsActive = false;
+}
 
 // ======================================================================
 // OBJEK SERVO & VARIABEL STATE
 // ======================================================================
 Servo servoCam;
-Servo servoLift;
-Servo servoGrip;
+Servo servoGripL;
+Servo servoGripR;
 
-int currentCamAngle  = 90; // Default posisi netral tengah
+int currentCamAngle  = 90; // Posisi aktual servo kamera
+int targetCamAngle   = 90; // Target posisi servo kamera (untuk smooth ramp)
 int currentLiftAngle = 0;  // Default posisi bawah
 int currentGripAngle = 0;  // Default posisi terbuka
 
 char rxBuffer[64];
 uint8_t rxIndex = 0;
 unsigned long lastCmdTime = 0;
-unsigned long lastLedBlink = 0;
+unsigned long lastCamRampMs = 0;
 
 // ======================================================================
 // FUNGSI EKSEKUSI AKTUATOR
 // ======================================================================
 void applyActuators(int cam, int lift, int grip) {
   // Batasi nilai rentang 0 - 180 derajat
-  currentCamAngle  = constrain(cam, 0, 180);
+  targetCamAngle   = constrain(cam, 0, 180);
   currentLiftAngle = constrain(lift, 0, 180);
   currentGripAngle = constrain(grip, 0, 180);
 
-  // 1. Eksekusi Servo Kamera
-  servoCam.write(currentCamAngle);
+  // 1. Servo Kamera digerakkan bertahap (smooth ramp) di loop()
 
-  // 2. Eksekusi Lifter
-#if LIFTER_USE_STEPPER
-  // Konversi sudut (0-180) ke langkah stepper target
-  targetStepperPos = map(currentLiftAngle, 0, 180, 0, 3200);
-#else
-  servoLift.write(currentLiftAngle);
-#endif
+  // 2. Eksekusi Lifter Stepper 28BYJ-48
+  targetStepperPos = map(currentLiftAngle, 0, 180, 0, STEPPER_MAX_STEPS);
 
-  // 3. Eksekusi Gripper
-  servoGrip.write(currentGripAngle);
-
-  // Kedipkan LED indikator tanda perintah aktif dieksekusi
-  digitalWrite(LED_INDICATOR_PIN, HIGH);
-  lastLedBlink = millis();
+  // 3. Eksekusi Gripper Kiri & Kanan (gerak menjepit simetris)
+  int gripL = currentGripAngle;
+  int gripR = GRIP_R_INVERT ? (180 - currentGripAngle) : currentGripAngle;
+  servoGripL.write(gripL);
+  servoGripR.write(gripR);
 }
 
 // ======================================================================
@@ -117,22 +139,18 @@ void setup() {
   // Hardware Serial ke ESP32 @ 115200 baud
   Serial.begin(115200);
 
-  pinMode(LED_INDICATOR_PIN, OUTPUT);
-  digitalWrite(LED_INDICATOR_PIN, LOW);
-
-  // Pasang Servo Pin
+  // Pasang Servo & Pin Stepper
   servoCam.attach(SERVO_CAM_PIN);
-#if LIFTER_USE_STEPPER
-  pinMode(STEPPER_STEP_PIN, OUTPUT);
-  pinMode(STEPPER_DIR_PIN, OUTPUT);
-  pinMode(STEPPER_EN_PIN, OUTPUT);
-  digitalWrite(STEPPER_EN_PIN, LOW); // Aktifkan driver
-#else
-  servoLift.attach(SERVO_LIFT_PIN);
-#endif
-  servoGrip.attach(SERVO_GRIP_PIN);
+  pinMode(STEPPER_IN1_PIN, OUTPUT);
+  pinMode(STEPPER_IN2_PIN, OUTPUT);
+  pinMode(STEPPER_IN3_PIN, OUTPUT);
+  pinMode(STEPPER_IN4_PIN, OUTPUT);
+  releaseStepperCoils();
+  servoGripL.attach(SERVO_GRIP_L_PIN);
+  servoGripR.attach(SERVO_GRIP_R_PIN);
 
   // Set Posisi Default Awal
+  servoCam.write(currentCamAngle);
   applyActuators(currentCamAngle, currentLiftAngle, currentGripAngle);
 
   Serial.println(F("[NANO-ACTUATOR] Siap menerima kontrol dari ESP32 Control!"));
@@ -158,28 +176,32 @@ void loop() {
     }
   }
 
-  // 2. Matikan LED kedip setelah 50ms
-  if (digitalRead(LED_INDICATOR_PIN) == HIGH && (millis() - lastLedBlink > 50)) {
-    digitalWrite(LED_INDICATOR_PIN, LOW);
+  // 2. Smooth ramp Servo Kamera (geser 1 derajat tiap CAM_RAMP_MS agar halus)
+  if (currentCamAngle != targetCamAngle) {
+    unsigned long nowMs = millis();
+    if (nowMs - lastCamRampMs >= CAM_RAMP_MS) {
+      lastCamRampMs = nowMs;
+      currentCamAngle += (currentCamAngle < targetCamAngle) ? 1 : -1;
+      servoCam.write(currentCamAngle);
+    }
   }
 
-#if LIFTER_USE_STEPPER
-  // Penggerak stepper bertahap (non-blocking)
-  if (currentStepperPos < targetStepperPos) {
-    digitalWrite(STEPPER_DIR_PIN, HIGH);
-    digitalWrite(STEPPER_STEP_PIN, HIGH);
-    delayMicroseconds(400);
-    digitalWrite(STEPPER_STEP_PIN, LOW);
-    delayMicroseconds(400);
-    currentStepperPos++;
-  } else if (currentStepperPos > targetStepperPos) {
-    digitalWrite(STEPPER_DIR_PIN, LOW);
-    digitalWrite(STEPPER_STEP_PIN, HIGH);
-    delayMicroseconds(400);
-    digitalWrite(STEPPER_STEP_PIN, LOW);
-    delayMicroseconds(400);
-    currentStepperPos--;
+  // 3. Penggerak stepper 28BYJ-48 (half-step non-blocking berbasis micros())
+  if (currentStepperPos != targetStepperPos) {
+    unsigned long nowUs = micros();
+    if (nowUs - lastStepUs >= STEPPER_STEP_US) {
+      lastStepUs = nowUs;
+      if (currentStepperPos < targetStepperPos) {
+        stepPhase = (stepPhase + 1) & 0x07;
+        currentStepperPos++;
+      } else {
+        stepPhase = (stepPhase + 7) & 0x07;
+        currentStepperPos--;
+      }
+      setStepperCoils(stepPhase);
+    }
+  } else if (!STEPPER_HOLD_COIL && coilsActive) {
+    releaseStepperCoils();
   }
-#endif
 }
 

@@ -40,7 +40,9 @@ MOVE_KEYS = {
     "KeyS": "back", "ArrowDown": "back",
     "KeyA": "right", "ArrowLeft": "right",  # Remap: Kiri (A) dibalik ke right agar motor fisik berbelok ke kiri
     "KeyD": "left", "ArrowRight": "left",   # Remap: Kanan (D) dibalik ke left agar motor fisik berbelok ke kanan
+    "KeyQ": "cam_up", "KeyE": "cam_down",   # Tahan Q/E untuk naik/turun kamera perlahan
 }
+CAM_TILT_DEG_PER_SEC = 45.0  # Kecepatan gerak sudut kamera saat tombol Q/E ditahan
 
 KEY_TIMEOUT = 0.8         # detik: tombol "ditahan" dianggap lepas jika heartbeat berhenti
 MAX_LINEAR = 0.50         # m/s, sama dengan MAX_SPEED di firmware kontrol
@@ -301,6 +303,8 @@ class Controller:
 
         self._held = set()
         self._held_ts = 0.0
+        self._cam_f = float(getattr(self.robot, "current_camera", 90))
+        self._cam_ts = time.time()
         self._pending_lock = None             # (nx, ny) ternormalisasi 0..1
         self._pickup_idx = -1
         self._pickup_next = 0.0
@@ -346,7 +350,7 @@ class Controller:
         with self._lock:
             self._held = {MOVE_KEYS[c] for c in codes if c in MOVE_KEYS}
             self._held_ts = time.time()
-            if self._held and self.mode == "AUTO":
+            if (self._held & {"fwd", "back", "left", "right"}) and self.mode == "AUTO":
                 self._set_mode("MANUAL", "Override manual")
 
     def press_gui(self, direction):
@@ -386,12 +390,15 @@ class Controller:
                 self.robot.set_lift("UP" if str(value).lower() in ("up", "1", "true") else "DOWN")
             elif name == "cam":
                 self.robot.set_camera(int(value))
+                self._cam_f = float(self.robot.current_camera)
                 self._event(f"Kamera: {self.robot.current_camera}°")
             elif name == "cam_up":
-                self.robot.set_camera(self.robot.current_camera + int(value or 10))
+                self.robot.set_camera(self.robot.current_camera + int(value or 5))
+                self._cam_f = float(self.robot.current_camera)
                 self._event(f"Kamera: {self.robot.current_camera}°")
             elif name == "cam_down":
-                self.robot.set_camera(self.robot.current_camera - int(value or 10))
+                self.robot.set_camera(self.robot.current_camera - int(value or 5))
+                self._cam_f = float(self.robot.current_camera)
                 self._event(f"Kamera: {self.robot.current_camera}°")
             elif name == "speed":
                 step = 0.1 if float(value) > 0 else -0.1
@@ -485,6 +492,12 @@ class Controller:
     def _manual_command(self, now):
         if self._held and now - self._held_ts > KEY_TIMEOUT:
             self._held = set()
+        dt = min(max(now - self._cam_ts, 0.0), 0.1)
+        self._cam_ts = now
+        cam_dir = ("cam_up" in self._held) - ("cam_down" in self._held)
+        if cam_dir != 0:
+            self._cam_f = _clamp(self._cam_f + cam_dir * CAM_TILT_DEG_PER_SEC * dt, 0.0, 180.0)
+            self.robot.current_camera = int(round(self._cam_f))
         fwd = ("fwd" in self._held) - ("back" in self._held)
         turn = ("left" in self._held) - ("right" in self._held)
         v_lin = min(BASE_LINEAR * self.speed_scale, MAX_LINEAR)

@@ -218,8 +218,8 @@
     <section class="card">
       <h2>Aktuator &amp; Servo</h2>
       <div class="row">
-        <button id="btnCamUp" class="blue">Kamera Atas <kbd>Q</kbd></button>
-        <button id="btnCamDn">Kamera Bawah <kbd>E</kbd></button>
+        <button id="btnCamUp" class="blue" data-key="KeyQ">Kamera Atas <kbd>Q</kbd></button>
+        <button id="btnCamDn" data-key="KeyE">Kamera Bawah <kbd>E</kbd></button>
       </div>
       <div class="row">
         <button id="btnGripClose" class="green">Jepit <kbd>J</kbd></button>
@@ -529,7 +529,7 @@ function pulseButton(id) {
 }
 
 // ------------------------------------------------------------ Keyboard
-const MOVE = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+const MOVE = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyQ", "KeyE"]);
 const held = new Set();
 const padHeld = new Set();
 let lastKeysSent = "";
@@ -542,6 +542,8 @@ function sendKeys(force) {
     const alt = { KeyW: "ArrowUp", KeyS: "ArrowDown", KeyA: "ArrowLeft", KeyD: "ArrowRight" }[k];
     $("pad" + k.slice(3)).classList.toggle("held", codes.includes(k) || codes.includes(alt));
   });
+  $("btnCamUp").classList.toggle("held", codes.includes("KeyQ"));
+  $("btnCamDn").classList.toggle("held", codes.includes("KeyE"));
 }
 setInterval(() => { if (held.size || padHeld.size) sendKeys(); }, 150);
 
@@ -557,8 +559,6 @@ const ACTIONS = {
   Digit3: () => { pulseButton("btnBlue"); action("color", "BLUE"); }, Numpad3: () => { pulseButton("btnBlue"); action("color", "BLUE"); },
   Digit4: () => { pulseButton("btnYellow"); action("color", "YELLOW"); }, Numpad4: () => { pulseButton("btnYellow"); action("color", "YELLOW"); },
   KeyR: () => { pulseButton("btnCancel"); action("cancel_target"); },
-  KeyQ: () => { pulseButton("btnCamUp"); action("cam_up", 10); },
-  KeyE: () => { pulseButton("btnCamDn"); action("cam_down", 10); },
   KeyJ: () => { pulseButton("btnGripClose"); action("grip", "close"); }, KeyK: () => { pulseButton("btnGripOpen"); action("grip", "open"); },
   KeyU: () => { pulseButton("btnLiftUp"); action("lift", "up"); }, KeyI: () => { pulseButton("btnLiftDown"); action("lift", "down"); },
   Equal: () => { pulseButton("btnSpdUp"); action("speed", 1); }, NumpadAdd: () => { pulseButton("btnSpdUp"); action("speed", 1); }, BracketRight: () => { pulseButton("btnSpdUp"); action("speed", 1); },
@@ -615,8 +615,6 @@ document.querySelectorAll("[data-color]").forEach((b) => (b.onclick = () => { pu
 $("btnCancel").onclick = () => { pulseButton("btnCancel"); action("cancel_target"); };
 $("btnSpdUp").onclick = () => { pulseButton("btnSpdUp"); action("speed", 1); };
 $("btnSpdDn").onclick = () => { pulseButton("btnSpdDn"); action("speed", -1); };
-$("btnCamUp").onclick = () => { pulseButton("btnCamUp"); action("cam_up", 10); };
-$("btnCamDn").onclick = () => { pulseButton("btnCamDn"); action("cam_down", 10); };
 $("btnGripClose").onclick = () => { pulseButton("btnGripClose"); action("grip", "close"); };
 $("btnGripOpen").onclick = () => { pulseButton("btnGripOpen"); action("grip", "open"); };
 $("btnLiftUp").onclick = () => { pulseButton("btnLiftUp"); action("lift", "up"); };
